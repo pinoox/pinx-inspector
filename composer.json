@@ -1,12 +1,15 @@
 {
   "name": "pinoox/pinx-inspector",
-  "version": "1.0.0",
   "description": "Development-only Pinx Inspector dashboard for Pinoox single-app projects",
   "type": "library",
   "license": "MIT",
   "keywords": ["pinoox", "pinx", "inspector", "devtools"],
   "require": {
     "php": "^8.2"
+  },
+  "suggest": {
+    "pinoox/devdb": "Enables DevDB JSON raw SQL execution and richer DevDB metadata in local development.",
+    "ext-pdo_sqlite": "Lets DevDB use the preferred SQLite-backed local engine when available."
   },
   "autoload": {
     "psr-4": {

@@ -347,6 +347,14 @@ function sqlite_database(string $root): string
     return $database !== '' ? resolve_project_path($root, $database) : devdb_path($root) . '/devdb.sqlite';
 }
 
+function devdb_configured_engine(string $root): string
+{
+    $env = read_env($root);
+    $engine = strtolower(trim((string) ($env['DEVDB_ENGINE'] ?? 'auto')));
+
+    return in_array($engine, ['auto', 'sqlite', 'json'], true) ? $engine : 'auto';
+}
+
 function connection_config(string $root): array
 {
     $env = read_env($root);
@@ -382,7 +390,12 @@ function engine(string $root): string
         return $connection;
     }
 
-    if (extension_loaded('pdo_sqlite') && is_file(sqlite_database($root))) {
+    $devdbEngine = devdb_configured_engine($root);
+    if ($devdbEngine === 'json') {
+        return 'devdb-json';
+    }
+
+    if (($devdbEngine === 'sqlite' || $devdbEngine === 'auto') && extension_loaded('pdo_sqlite')) {
         return 'devdb-sqlite';
     }
 
@@ -441,7 +454,7 @@ function summary_payload(string $root): array
 {
     $config = app_config($root);
     $pincore = pincore_config($root);
-    $tables = tables_payload($root);
+    $tables = safe_tables_payload($root);
     $connection = connection_config($root)['connection'];
     $engine = engine($root);
     $migrations = json_file(devdb_path($root) . '/meta/migrations.json', []);
@@ -514,16 +527,18 @@ function database_payload(string $root): array
     $config = connection_config($root);
     $env = $config['env'];
     $engine = engine($root);
-    $tables = tables_payload($root);
+    $tables = safe_tables_payload($root);
     $tableNames = array_map(static fn (array $table): string => (string) ($table['name'] ?? ''), $tables['tables'] ?? []);
     $coreTables = core_tables_payload($root, $tableNames);
     $storage = devdb_storage_payload($root);
+    $error = (string) ($tables['error'] ?? '');
 
     return [
         'connection' => [
             'name' => $config['connection'],
             'engine' => $engine,
             'engine_label' => engine_label($engine),
+            'configured_engine' => devdb_configured_engine($root),
             'driver' => (string) ($env['DB_DRIVER'] ?? ''),
             'host' => (string) ($env['DB_HOST'] ?? ''),
             'port' => (string) ($env['DB_PORT'] ?? ''),
@@ -534,6 +549,8 @@ function database_payload(string $root): array
             'sqlite_database' => sqlite_database($root),
             'sqlite_available' => extension_loaded('pdo_sqlite'),
             'mode' => str_starts_with($engine, 'devdb-') ? 'development fallback' : 'configured database',
+            'connected' => $error === '',
+            'error' => $error,
         ],
         'tables' => [
             'count' => count($tableNames),
@@ -756,6 +773,19 @@ function tables_payload(string $root): array
         'devdb-sqlite' => devdb_sqlite_tables_payload($root),
         default => devdb_json_tables_payload($root),
     };
+}
+
+function safe_tables_payload(string $root): array
+{
+    try {
+        return tables_payload($root);
+    } catch (Throwable $exception) {
+        return [
+            'engine' => engine($root),
+            'tables' => [],
+            'error' => $exception->getMessage(),
+        ];
+    }
 }
 
 function devdb_json_tables_payload(string $root): array
@@ -1036,7 +1066,7 @@ function raw_query_payload(string $root, array $payload): array
     }
 
     if (engine($root) === 'devdb-json') {
-        throw new RuntimeException('Raw SQL is not available for DevDB JSON. Enable PDO SQLite or use the visual query builder.');
+        return devdb_json_raw_query_payload($root, $sql, is_array($payload['bindings'] ?? null) ? $payload['bindings'] : []);
     }
 
     $engine = engine($root);
@@ -1063,6 +1093,50 @@ function raw_query_payload(string $root, array $payload): array
         'message' => $isSelect
             ? 'Raw SQL returned ' . count($rows) . ' row(s).'
             : 'Raw SQL executed. Affected rows: ' . $statement->rowCount() . '.',
+    ];
+}
+
+function devdb_json_raw_query_payload(string $root, string $sql, array $bindings = []): array
+{
+    if (!class_exists(\Pinoox\Component\Database\DevDB\DevDbStore::class)
+        || !class_exists(\Pinoox\Component\Database\DevDB\DevDbSqlTranslator::class)) {
+        throw new RuntimeException('Raw SQL for DevDB JSON requires pinoox/devdb. Install it with composer require --dev pinoox/devdb.');
+    }
+
+    $translator = new \Pinoox\Component\Database\DevDB\DevDbSqlTranslator(
+        new \Pinoox\Component\Database\DevDB\DevDbStore(devdb_path($root)),
+    );
+    $started = microtime(true);
+    $isRead = preg_match('/^\s*(select|show|describe|desc|explain)\b/i', $sql) === 1;
+
+    if ($isRead) {
+        $rows = array_map(static fn (object $row): array => (array) $row, $translator->select($sql, $bindings));
+        $elapsed = round((microtime(true) - $started) * 1000, 2);
+
+        return [
+            'ok' => true,
+            'engine' => 'devdb-json',
+            'type' => 'read',
+            'rows' => $rows,
+            'affected' => null,
+            'elapsed_ms' => $elapsed,
+            'message' => 'DevDB JSON SQL returned ' . count($rows) . ' row(s).',
+        ];
+    }
+
+    $results = $translator->executeDump($sql);
+    $elapsed = round((microtime(true) - $started) * 1000, 2);
+    $affected = array_sum(array_map(static fn (array $result): int => (int) ($result['affected'] ?? 0), $results));
+
+    return [
+        'ok' => true,
+        'engine' => 'devdb-json',
+        'type' => 'write',
+        'rows' => [],
+        'affected' => $affected,
+        'statements' => $results,
+        'elapsed_ms' => $elapsed,
+        'message' => 'DevDB JSON SQL executed ' . count($results) . ' statement(s). Affected rows: ' . $affected . '.',
     ];
 }
 
@@ -1635,7 +1709,7 @@ function table_relations_payload(string $root, string $engine, string $table, ar
 
     $existing = [];
     if ($root !== '') {
-        $existing = array_map(static fn (array $item): string => strtolower((string) ($item['name'] ?? '')), tables_payload($root)['tables'] ?? []);
+        $existing = array_map(static fn (array $item): string => strtolower((string) ($item['name'] ?? '')), safe_tables_payload($root)['tables'] ?? []);
     }
     $existingLookup = array_flip($existing);
 

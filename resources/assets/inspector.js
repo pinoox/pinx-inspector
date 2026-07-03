@@ -865,13 +865,15 @@
         host,
         database: connection.database || connection.sqlite_database || connection.devdb_path || 'auto',
         username: connection.username || 'not required',
-        connected: true,
+        connected: connection.connected !== false,
+        error: connection.error || '',
         response_time: tables.count > 0 ? '8ms' : '12ms',
         checked_at: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
         charset: connection.name === 'devdb' ? 'utf8' : 'utf8mb4',
         collation: connection.name === 'devdb' ? 'json/sqlite local' : 'utf8mb4_unicode_ci',
         prefix: 'pinx_',
         mode: connection.mode || 'configured database',
+        configured_engine: connection.configured_engine || '',
       }];
     }
 
@@ -887,7 +889,7 @@
           <td class="px-4 py-4 text-slate-200">${esc(row.driver)}</td>
           <td class="px-4 py-4 text-slate-300">${esc(row.host)}</td>
           <td class="max-w-[220px] truncate px-4 py-4 text-slate-300" title="${esc(row.database)}">${esc(row.database)}</td>
-          <td class="px-4 py-4"><span class="inline-flex items-center gap-2 rounded-full bg-emerald-400/10 px-2 py-1 text-xs font-bold text-emerald-300"><span class="h-2 w-2 rounded-full bg-emerald-400"></span>Connected</span></td>
+          <td class="px-4 py-4"><span class="inline-flex items-center gap-2 rounded-full px-2 py-1 text-xs font-bold ${row.connected ? 'bg-emerald-400/10 text-emerald-300' : 'bg-rose-400/10 text-rose-300'}"><span class="h-2 w-2 rounded-full ${row.connected ? 'bg-emerald-400' : 'bg-rose-400'}"></span>${row.connected ? 'Connected' : 'Failed'}</span></td>
           <td class="px-4 py-4 text-slate-300">${esc(row.response_time)}</td>
           <td class="px-4 py-4 text-slate-400">${esc(row.checked_at)}</td>
           <td class="px-4 py-4"><button type="button" data-connection-index="${index}" class="connection-details-btn rounded-xl border border-violet-300/20 bg-violet-300/10 px-3 py-2 text-xs font-bold text-violet-100">Details</button></td>
@@ -918,6 +920,7 @@
               <div class="grid h-12 w-12 place-items-center rounded-2xl border border-blue-300/20 bg-blue-300/10 text-blue-200">${icon('database', 'h-5 w-5')}</div>
               <div><div class="text-lg font-black text-white">${esc(row.name)}</div><div class="text-sm text-slate-500">${esc(row.driver)} | ${esc(row.host)}</div></div>
               <span class="rounded-full bg-violet-400/15 px-3 py-1 text-xs font-bold text-violet-200">Default</span>
+              <span class="rounded-full px-3 py-1 text-xs font-bold ${row.connected ? 'bg-emerald-400/10 text-emerald-300' : 'bg-rose-400/10 text-rose-300'}">${row.connected ? 'Connected' : 'Failed'}</span>
             </div>
           </div>
           <button onclick="loadDatabase()" class="grid h-10 w-10 place-items-center rounded-xl border border-white/10 bg-white/5 text-slate-300">${icon('refreshCw')}</button>
@@ -935,10 +938,11 @@
           <div class="mt-4 rounded-3xl border border-white/10 bg-black/20 p-4">
             <div class="mb-4 font-bold text-white">Status</div>
             <div class="space-y-3 text-sm">
-              <div class="flex justify-between"><span class="text-slate-500">Status</span><span class="rounded-full bg-emerald-400/10 px-2 py-1 text-xs font-bold text-emerald-300">Connected</span></div>
+              <div class="flex justify-between"><span class="text-slate-500">Status</span><span class="rounded-full px-2 py-1 text-xs font-bold ${row.connected ? 'bg-emerald-400/10 text-emerald-300' : 'bg-rose-400/10 text-rose-300'}">${row.connected ? 'Connected' : 'Failed'}</span></div>
               <div class="flex justify-between"><span class="text-slate-500">Response Time</span><span class="text-slate-100">${esc(row.response_time)}</span></div>
               <div class="flex justify-between"><span class="text-slate-500">Last Checked</span><span class="text-slate-100">${esc(row.checked_at)}</span></div>
             </div>
+            ${row.error ? `<div class="mt-4 rounded-2xl border border-rose-300/20 bg-rose-400/10 p-3 text-sm text-rose-100"><div class="font-bold">Connection error</div><div class="mt-1 break-words text-xs opacity-80">${esc(row.error)}</div><button onclick='copyText(${JSON.stringify(row.error)})' class="mt-3 rounded-xl border border-rose-200/20 px-3 py-2 text-xs font-bold">Copy error</button></div>` : ''}
             <button onclick="loadDatabase()" class="mt-4 rounded-xl border border-violet-300/30 bg-violet-300/10 px-3 py-2 text-sm font-bold text-violet-100">Test Connection</button>
           </div>
         ` : ''}
@@ -949,6 +953,7 @@
               ${connectionConfigRow('Connection name', row.name)}
               ${connectionConfigRow('Driver', row.driver)}
               ${connectionConfigRow('Mode', row.mode)}
+              ${connectionConfigRow('DevDB engine preference', row.configured_engine || '-')}
               ${connectionConfigRow('Database', row.database)}
               ${connectionConfigRow('Host / Path', row.host)}
               ${connectionConfigRow('Table prefix', row.prefix || '(none)')}
