@@ -1,0 +1,305 @@
+/* Pinx Inspector product UI layer. Keep this file small, semantic, and dependency-free. */
+:root {
+  --pinx-bg: #050914;
+  --pinx-panel: rgba(9, 19, 32, .92);
+  --pinx-panel-soft: rgba(255, 255, 255, .045);
+  --pinx-border: rgba(255, 255, 255, .10);
+  --pinx-border-strong: rgba(167, 139, 250, .34);
+  --pinx-text: #e5edf7;
+  --pinx-muted: #94a3b8;
+  --pinx-dim: #64748b;
+  --pinx-accent: #8b5cf6;
+  --pinx-accent-2: #22d3ee;
+  --pinx-success: #34d399;
+  --pinx-danger: #fb7185;
+  --pinx-warning: #fbbf24;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  letter-spacing: 0;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  transition: background-color .16s ease, border-color .16s ease, color .16s ease, transform .16s ease, opacity .16s ease;
+}
+
+button:not(:disabled):hover {
+  transform: translateY(-1px);
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid rgba(167, 139, 250, .72);
+  outline-offset: 2px;
+}
+
+.view {
+  max-width: 1680px;
+  margin-inline: auto;
+}
+
+.nav-btn {
+  display: flex;
+  align-items: center;
+  gap: .65rem;
+  min-height: 2.35rem;
+}
+
+.nav-btn::before {
+  content: "";
+  width: .42rem;
+  height: .42rem;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, .35);
+  flex: 0 0 auto;
+}
+
+.nav-btn.bg-violet-500\/20::before,
+.nav-btn[aria-current="page"]::before {
+  background: var(--pinx-accent-2);
+  box-shadow: 0 0 18px rgba(34, 211, 238, .5);
+}
+
+.ux-page-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--pinx-border);
+  border-radius: 1.5rem;
+  background: linear-gradient(180deg, rgba(13, 24, 39, .94), rgba(7, 15, 28, .92));
+  box-shadow: 0 18px 70px rgba(0, 0, 0, .22);
+}
+
+.ux-page-kicker {
+  color: var(--pinx-dim);
+  font-size: .78rem;
+  font-weight: 800;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.ux-page-title {
+  margin-top: .25rem;
+  color: white;
+  font-size: clamp(1.35rem, 1.1rem + .7vw, 2rem);
+  font-weight: 900;
+  line-height: 1.1;
+}
+
+.ux-page-copy {
+  margin-top: .4rem;
+  max-width: 50rem;
+  color: var(--pinx-muted);
+  font-size: .9rem;
+  line-height: 1.55;
+}
+
+.ux-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: .55rem;
+}
+
+.ux-btn {
+  min-height: 2.45rem;
+  border: 1px solid var(--pinx-border);
+  border-radius: .9rem;
+  background: rgba(255, 255, 255, .055);
+  padding: .55rem .85rem;
+  color: #dbe7f5;
+  font-size: .86rem;
+  font-weight: 800;
+}
+
+.ux-btn-primary {
+  border-color: rgba(167, 139, 250, .35);
+  background: linear-gradient(180deg, #8b5cf6, #6d28d9);
+  color: white;
+  box-shadow: 0 16px 34px rgba(109, 40, 217, .24);
+}
+
+.ux-btn-success {
+  border-color: rgba(52, 211, 153, .24);
+  background: rgba(52, 211, 153, .10);
+  color: #a7f3d0;
+}
+
+.ux-btn-danger {
+  border-color: rgba(251, 113, 133, .24);
+  background: rgba(251, 113, 133, .10);
+  color: #fecdd3;
+}
+
+.ux-card,
+.ux-panel {
+  border: 1px solid var(--pinx-border);
+  border-radius: 1.35rem;
+  background: var(--pinx-panel);
+  box-shadow: 0 18px 70px rgba(0, 0, 0, .22);
+}
+
+.ux-panel {
+  overflow: hidden;
+}
+
+.ux-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  margin-bottom: 1rem;
+  padding: .75rem;
+  border: 1px solid var(--pinx-border);
+  border-radius: 1.2rem;
+  background: rgba(9, 19, 32, .72);
+}
+
+.ux-filter {
+  min-height: 2.5rem;
+  border: 1px solid var(--pinx-border);
+  border-radius: .9rem;
+  background: rgba(0, 0, 0, .26);
+  padding-inline: .85rem;
+  color: var(--pinx-text);
+}
+
+.ux-filter.pl-9,
+input.ux-filter.pl-9 {
+  padding-left: 2.25rem;
+}
+
+.ux-helper {
+  border: 1px solid rgba(34, 211, 238, .18);
+  border-radius: 1rem;
+  background: rgba(34, 211, 238, .075);
+  padding: .75rem .9rem;
+  color: #bae6fd;
+  font-size: .82rem;
+  line-height: 1.55;
+}
+
+.ux-two-pane {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 22rem;
+  gap: 1rem;
+}
+
+.ux-detail {
+  min-height: 42rem;
+  border-left: 1px solid var(--pinx-border);
+  padding-left: 1rem;
+}
+
+.ux-table-shell {
+  overflow: hidden;
+  border: 1px solid var(--pinx-border);
+  border-radius: 1.25rem;
+  background: rgba(9, 19, 32, .92);
+}
+
+.ux-scroll {
+  overflow: auto;
+}
+
+table th {
+  color: #9caec4;
+  font-size: .72rem;
+  font-weight: 800;
+  letter-spacing: .03em;
+}
+
+table td {
+  vertical-align: middle;
+}
+
+pre,
+code {
+  font-variant-ligatures: none;
+}
+
+#detailDrawerBody .space-y-4 > *,
+.ux-detail .space-y-4 > * {
+  border-radius: 1.1rem;
+}
+
+@media (max-width: 1280px) {
+  .ux-two-pane {
+    grid-template-columns: 1fr;
+  }
+
+  .ux-detail {
+    min-height: 0;
+    border-left: 0;
+    padding-left: 0;
+  }
+}
+
+@media (max-width: 768px) {
+  body > .grid > aside {
+    max-height: none;
+    overflow: hidden;
+  }
+
+  body > .grid > aside nav {
+    display: none;
+  }
+
+  .mobile-quick-nav {
+    display: flex;
+    scrollbar-width: thin;
+  }
+
+  .mobile-quick-nav .nav-btn {
+    flex: 0 0 auto;
+  }
+
+  body > .grid > aside nav > div:first-child,
+  body > .grid > aside > .mt-6,
+  body > .grid > aside > .mt-3 {
+    display: none;
+  }
+
+  body > .grid > aside nav > div > .px-3 {
+    display: none;
+  }
+
+  .nav-btn {
+    min-height: 2.15rem;
+    border: 1px solid var(--pinx-border);
+    background: rgba(255, 255, 255, .035);
+    padding: .45rem .6rem;
+    font-size: .82rem;
+  }
+
+  .ux-page-head,
+  .ux-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .ux-actions {
+    justify-content: stretch;
+  }
+
+  .ux-actions > *,
+  .ux-btn {
+    width: 100%;
+  }
+}
