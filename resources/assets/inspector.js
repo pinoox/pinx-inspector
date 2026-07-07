@@ -1591,10 +1591,12 @@
     }
 
     function routeGroup(route) {
+      if (route.channel) return route.channel;
       const uri = String(route.uri || '');
-      const file = String(route.file || '');
+      const file = String(route.file || '').toLowerCase();
+      if (file.includes('/api/') || file.endsWith('/api.php') || file.startsWith('routes/api')) return 'api';
       if (uri.startsWith('/api') || uri.startsWith('api/')) return 'api';
-      if (file.toLowerCase().includes('console')) return 'console';
+      if (file.includes('console')) return 'console';
       return 'web';
     }
 

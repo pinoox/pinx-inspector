@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/platform-context.php';
 require_once __DIR__ . '/manifest-context.php';
+require_once __DIR__ . '/route-context.php';
 
 $platformRoot = normalize_path((string) ($_SERVER['PINX_INSPECTOR_PROJECT_ROOT'] ?? getenv('PINX_INSPECTOR_PROJECT_ROOT') ?: getcwd()));
 $root = inspector_scope_root($platformRoot);
@@ -344,16 +345,18 @@ function devdb_path(string $root): string
 {
     $env = read_env($root);
     $path = (string) ($env['DEVDB_PATH'] ?? 'storage/devdb');
+    $platformRoot = inspector_platform_root_from_scope($root);
 
-    return resolve_project_path($root, $path);
+    return resolve_project_path($platformRoot, $path);
 }
 
 function sqlite_database(string $root): string
 {
     $env = read_env($root);
     $database = (string) ($env['DEVDB_SQLITE_DATABASE'] ?? '');
+    $platformRoot = inspector_platform_root_from_scope($root);
 
-    return $database !== '' ? resolve_project_path($root, $database) : devdb_path($root) . '/devdb.sqlite';
+    return $database !== '' ? resolve_project_path($platformRoot, $database) : devdb_path($root) . '/devdb.sqlite';
 }
 
 function devdb_configured_engine(string $root): string
@@ -712,7 +715,26 @@ function migration_sources(string $root): array
         $paths[] = ['scope' => 'pincore', 'path' => $pincore . '/database/migrations'];
     }
 
-    return $paths;
+    $unique = [];
+    $seen = [];
+
+    foreach ($paths as $source) {
+        $path = (string) ($source['path'] ?? '');
+        if ($path === '' || !is_dir($path)) {
+            continue;
+        }
+
+        $real = realpath($path);
+        $key = $real !== false ? strtolower($real) : strtolower(normalize_path($path));
+        if (isset($seen[$key])) {
+            continue;
+        }
+
+        $seen[$key] = true;
+        $unique[] = $source;
+    }
+
+    return $unique;
 }
 
 function resolve_pincore_path(string $root): ?string
@@ -2177,9 +2199,11 @@ function migrations_payload(string $root): array
 
     foreach ($files as $file) {
         $name = (string) ($file['migration'] ?? pathinfo((string) ($file['name'] ?? ''), PATHINFO_FILENAME));
-        if (isset($seen[migration_key($name)])) {
+        $migrationKey = migration_key($name);
+        if (isset($seen[$migrationKey])) {
             continue;
         }
+        $seen[$migrationKey] = true;
         $items[] = migration_item_payload($name, $file, [
             'package' => (string) ($file['scope'] ?? 'app'),
             'batch' => null,
@@ -2226,12 +2250,21 @@ function migrations_payload(string $root): array
 function migration_files_payload(string $root): array
 {
     $files = [];
+    $seenFiles = [];
+
     foreach (migration_sources($root) as $source) {
         $path = (string) ($source['path'] ?? '');
         if (!is_dir($path)) {
             continue;
         }
         foreach (glob($path . '/*.php') ?: [] as $file) {
+            $real = realpath($file);
+            $key = $real !== false ? strtolower($real) : strtolower(normalize_path($file));
+            if (isset($seenFiles[$key])) {
+                continue;
+            }
+            $seenFiles[$key] = true;
+
             $content = (string) file_get_contents($file);
             $relative = ltrim(str_replace(normalize_path($root), '', normalize_path($file)), '/');
             if (str_starts_with($relative, '../')) {
@@ -2413,14 +2446,12 @@ function migration_line_status(string $line): string
 
 function routes_payload(string $root): array
 {
-    $config = app_config($root);
-    $routeFiles = $config['router']['routes'] ?? ['routes/web.php', 'routes/actions.php'];
-    $routeFiles = is_array($routeFiles) ? $routeFiles : [];
+    $manifest = discover_route_files($root);
     $files = [];
     $routes = [];
     $actions = [];
 
-    foreach ($routeFiles as $routeFile) {
+    foreach ($manifest as $routeFile) {
         $relative = trim(str_replace('\\', '/', (string) $routeFile), '/');
         if ($relative === '') {
             continue;
@@ -2428,19 +2459,22 @@ function routes_payload(string $root): array
 
         $path = resolve_project_path($root, $relative);
         $exists = is_file($path);
-        $fileRoutes = $exists ? parse_route_file($path, $relative) : [];
-        $fileActions = $exists ? parse_route_actions_file($path, $relative) : [];
+        $parsed = $exists ? parse_routes_from_file($root, $relative) : ['routes' => [], 'actions' => []];
+        $fileRoutes = $parsed['routes'];
+        $fileActions = $parsed['actions'];
         $files[] = [
             'path' => $relative,
             'exists' => $exists,
             'routes' => count($fileRoutes),
             'actions' => count($fileActions),
+            'channel' => route_channel_for_file($relative),
             'modified_at' => $exists ? date(DATE_ATOM, filemtime($path) ?: time()) : null,
         ];
         $routes = array_merge($routes, $fileRoutes);
         $actions = array_merge($actions, $fileActions);
     }
 
+    $routes = routes_dedupe($routes);
     $routes = enrich_routes_with_actions($routes, $actions);
     $actions = enrich_actions_with_routes($actions, $routes);
 
@@ -3992,17 +4026,14 @@ function lang_payload(string $root): array
 
 function lang_files_payload(string $root): array
 {
+    $package = (string) (app_config($root)['package'] ?? basename($root));
     $patterns = [
         'lang/*/*.lang.php',
-        'lang/*/*.php',
         'lang/*.json',
         'theme/*/lang/*/*.lang.php',
-        'theme/*/lang/*/*.php',
         'theme/*/lang/*.json',
         'theme/*/resource/lang/*/*.lang.php',
-        'theme/*/resource/lang/*/*.php',
         'resource/*/lang/*/*.lang.php',
-        'resource/*/lang/*/*.php',
     ];
 
     $candidates = [];
@@ -4019,7 +4050,7 @@ function lang_files_payload(string $root): array
     foreach ($candidates as $file) {
         $relative = ltrim(str_replace(normalize_path($root), '', normalize_path($file)), '/');
         $content = (string) file_get_contents($file);
-        $parsed = lang_file_meta($relative, $content);
+        $parsed = lang_file_meta($relative, $content, $package);
         $files[] = [
             'name' => basename($file),
             'path' => $relative,
@@ -4050,12 +4081,12 @@ function lang_files_payload(string $root): array
     return $files;
 }
 
-function lang_file_meta(string $relative, string $content): array
+function lang_file_meta(string $relative, string $content, ?string $package = null): array
 {
     $path = str_replace('\\', '/', $relative);
     $parts = explode('/', $path);
     $scope = str_starts_with($path, 'theme/') || str_starts_with($path, 'resource/') ? 'theme' : 'app';
-    $package = $scope === 'theme' ? ($parts[1] ?? 'theme') : 'app';
+    $resolvedPackage = $package ?? ($scope === 'theme' ? ($parts[1] ?? 'theme') : 'app');
     $locale = 'unknown';
     foreach ($parts as $index => $part) {
         if ($part === 'lang' && isset($parts[$index + 1]) && !str_contains($parts[$index + 1], '.')) {
@@ -4072,7 +4103,7 @@ function lang_file_meta(string $relative, string $content): array
 
     return [
         'scope' => $scope,
-        'package' => $package,
+        'package' => $resolvedPackage,
         'locale' => $locale,
         'group' => $group,
         'format' => str_ends_with(strtolower($path), '.json') ? 'json' : 'php',
