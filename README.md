@@ -1,6 +1,6 @@
 # Pinx Inspector
 
-Development-only graphical inspector for Pinoox single-app projects.
+Development-only graphical inspector for Pinoox projects (single-app and multi-app platform).
 
 Pinx Inspector gives developers a local dashboard for the current app: database
 connections, tables, rows, visual queries, migrations, routes, logs, config,
@@ -13,19 +13,27 @@ Install it in applications as a dev dependency:
 composer require --dev pinoox/pinx-inspector
 ```
 
-Then run:
+Single-app (`pinx dev`):
 
 ```bash
 pinx dev
+# http://127.0.0.1:8000/~inspector
 ```
 
-Open the inspector at:
+Multi-app platform (`php pinoox`):
 
-```text
-http://127.0.0.1:8000/~inspector
+```bash
+composer require --dev pinoox/pinx-inspector
+php pinoox serve
+# http://127.0.0.1:8000/~inspector
+
+php pinoox dev spark
+php pinoox inspector --app=com_pinoox_manager
 ```
 
-`pinx-cli` mounts this package during local development. It is not required in production and should stay in `require-dev`.
+On multi-app installs, Inspector shows an **App** dropdown in the header. The
+selected package is sent as `?package=` on API calls and stored in
+`localStorage` (`pinx.inspector.package`).
 
 ## Database and DevDB
 

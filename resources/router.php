@@ -2,7 +2,10 @@
 
 declare(strict_types=1);
 
-$root = normalize_path((string) ($_SERVER['PINX_INSPECTOR_PROJECT_ROOT'] ?? getenv('PINX_INSPECTOR_PROJECT_ROOT') ?: getcwd()));
+require_once __DIR__ . '/platform-context.php';
+
+$platformRoot = normalize_path((string) ($_SERVER['PINX_INSPECTOR_PROJECT_ROOT'] ?? getenv('PINX_INSPECTOR_PROJECT_ROOT') ?: getcwd()));
+$root = inspector_scope_root($platformRoot);
 $path = parse_url((string) ($_SERVER['REQUEST_URI'] ?? '/'), PHP_URL_PATH) ?: '/';
 $basePath = rtrim((string) ($_SERVER['PINX_INSPECTOR_BASE_PATH'] ?? getenv('PINX_INSPECTOR_BASE_PATH') ?: ''), '/');
 
@@ -39,8 +42,13 @@ try {
         return;
     }
 
+    if ($path === '/api/apps') {
+        json_response(apps_payload($platformRoot));
+        return;
+    }
+
     if ($path === '/api/summary') {
-        json_response(summary_payload($root));
+        json_response(summary_payload($root, $platformRoot));
         return;
     }
 
@@ -295,7 +303,7 @@ function normalize_path(string $path): string
 function read_env(string $root): array
 {
     $env = [];
-    $file = $root . '/.env';
+    $file = inspector_env_root($root) . '/.env';
     if (!is_file($file)) {
         return $env;
     }
@@ -450,10 +458,11 @@ function pincore_config(string $root): array
     return is_array($config) ? $config : [];
 }
 
-function summary_payload(string $root): array
+function summary_payload(string $root, ?string $platformRoot = null): array
 {
+    $platformRoot = normalize_path($platformRoot ?? inspector_platform_root_from_scope($root));
     $config = app_config($root);
-    $pincore = pincore_config($root);
+    $pincore = pincore_config($platformRoot);
     $tables = safe_tables_payload($root);
     $connection = connection_config($root)['connection'];
     $engine = engine($root);
@@ -475,6 +484,12 @@ function summary_payload(string $root): array
             'frontend' => (array) ($config['frontend'] ?? []),
             'pinx' => (array) ($config['pinx'] ?? []),
             'root' => $root,
+        ],
+        'platform' => [
+            'enabled' => inspector_is_platform($platformRoot),
+            'root' => $platformRoot,
+            'package' => inspector_is_platform($platformRoot) ? inspector_active_package($platformRoot) : null,
+            'apps' => inspector_is_platform($platformRoot) ? count(inspector_list_apps($platformRoot)) : 0,
         ],
         'database' => [
             'connection' => $connection,
@@ -681,16 +696,15 @@ function migration_sources(string $root): array
 
 function resolve_pincore_path(string $root): ?string
 {
+    $platformRoot = inspector_platform_root_from_scope($root);
     $env = read_env($root);
     $candidates = [];
     if (!empty($env['PINOOX_CORE_PATH'])) {
-        $candidates[] = resolve_project_path($root, (string) $env['PINOOX_CORE_PATH']);
+        $candidates[] = resolve_project_path($platformRoot, (string) $env['PINOOX_CORE_PATH']);
     }
 
-    $candidates[] = $root . '/vendor/pinoox/pincore';
-    $candidates[] = dirname($root) . '/pincore';
-    $candidates[] = dirname($root, 2) . '/pincore';
-    $candidates[] = dirname($root, 3) . '/pincore';
+    $candidates[] = $platformRoot . '/vendor/pinoox/pincore';
+    $candidates[] = dirname($platformRoot) . '/pincore';
 
     foreach ($candidates as $candidate) {
         $path = normalize_path((string) $candidate);
@@ -1899,6 +1913,9 @@ function cli_actions(): array
 
 function run_cli_action(string $root, string $action): array
 {
+    $platformRoot = inspector_platform_root_from_scope($root);
+    $package = inspector_is_platform($platformRoot) ? inspector_active_package($platformRoot) : null;
+
     $commands = [
         'doctor' => ['doctor', '--json', '--no-ansi'],
         'migrate_status' => ['migrate:status', '--no-ansi'],
@@ -1921,9 +1938,23 @@ function run_cli_action(string $root, string $action): array
         throw new RuntimeException('Unknown Inspector action.');
     }
 
-    $pinx = $root . '/bin/pinx';
-    if (!is_file($pinx)) {
-        throw new RuntimeException('Project-local bin/pinx was not found.');
+    $cli = null;
+    $cwd = $platformRoot;
+    $args = $commands[$action];
+
+    if (is_file($platformRoot . '/pinoox')) {
+        $cli = [PHP_BINARY, $platformRoot . '/pinoox'];
+    } elseif (is_file($platformRoot . '/bin/pinx')) {
+        $cli = [PHP_BINARY, $platformRoot . '/bin/pinx'];
+    }
+
+    if ($cli === null) {
+        throw new RuntimeException('Project CLI was not found (pinoox or bin/pinx).');
+    }
+
+    $cmd = array_merge($cli, $args);
+    if ($package !== null && $package !== '' && basename((string) $cli[1]) === 'pinoox') {
+        array_splice($cmd, 3, 0, [$package]);
     }
 
     $descriptor = [
@@ -1931,7 +1962,7 @@ function run_cli_action(string $root, string $action): array
         1 => ['pipe', 'w'],
         2 => ['pipe', 'w'],
     ];
-    $process = proc_open(array_merge([PHP_BINARY, $pinx], $commands[$action]), $descriptor, $pipes, $root);
+    $process = proc_open($cmd, $descriptor, $pipes, $cwd);
     if (!is_resource($process)) {
         throw new RuntimeException('Unable to start Pinx command.');
     }
@@ -2956,10 +2987,11 @@ function themes_payload(string $root): array
 
 function pinker_payload(string $root): array
 {
+    $platformRoot = inspector_platform_root_from_scope($root);
     $app = app_config($root);
-    $composer = json_file($root . '/composer.json', []);
+    $composer = json_file($platformRoot . '/composer.json', []);
     $package = (string) ($app['package'] ?? basename($root));
-    $pinker = $root . '/pinker';
+    $pinker = $platformRoot . '/pinker';
     $appPinker = $pinker . '/apps/' . $package;
     $cache = $appPinker . '/cache';
     $routesCache = $cache . '/routes.php';

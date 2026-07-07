@@ -9,9 +9,15 @@
           </div>
           <h1 id="viewTitle" class="sr-only">Dashboard</h1>
         </div>
-        <div class="flex gap-2">
+        <div class="flex flex-wrap items-center gap-3 max-md:w-full">
+          <label class="flex min-w-[12rem] flex-1 items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm max-md:min-w-full" id="appSelectorWrap" hidden>
+            <span class="text-xs uppercase tracking-wide text-slate-500">App</span>
+            <select id="appSelector" class="w-full bg-transparent text-slate-100 outline-none"></select>
+          </label>
+          <div class="flex gap-2">
           <button id="refresh" title="Refresh" class="grid h-9 w-9 place-items-center rounded-xl border border-white/10 bg-white/5 text-slate-300 hover:bg-white/10"><?= inspector_icon('refresh-cw') ?></button>
           <button onclick="runInspectorAction('doctor')" title="Run Doctor" class="grid h-9 w-9 place-items-center rounded-xl border border-white/10 bg-white/5 text-slate-300 hover:bg-white/10"><?= inspector_icon('stethoscope') ?></button>
           <button id="exportBtn" title="Export JSON" class="grid h-9 w-9 place-items-center rounded-xl border border-white/10 bg-white/5 text-slate-300 hover:bg-white/10"><?= inspector_icon('download') ?></button>
+          </div>
         </div>
       </header>
