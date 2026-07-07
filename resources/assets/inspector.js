@@ -2188,7 +2188,7 @@
       if ($('envTotalBadge')) $('envTotalBadge').textContent = Number(payload.summary?.total || 0).toLocaleString();
       if ($('envEditor')) $('envEditor').value = payload.content || '';
       $('envSummary').innerHTML = `
-        ${smallCard('Variables', payload.summary?.total || 0, payload.exists ? '.env exists' : 'will be created', 'violet')}
+        ${smallCard('Variables', payload.summary?.total || 0, payload.exists ? payload.path || '.env exists' : 'will be created', 'violet')}
         ${smallCard('App', payload.summary?.app || 0, 'APP_* values', 'blue')}
         ${smallCard('Database', payload.summary?.database || 0, 'DB_* values', 'success')}
         ${smallCard('DevDB', payload.summary?.devdb || 0, 'DEVDB_* values', 'warn')}
@@ -2199,6 +2199,7 @@
           <h3 class="font-bold text-white">Developer Defaults</h3>
           <p class="mt-3 text-sm leading-relaxed text-slate-400">For local single-app development, keep .env small. Pinoox can auto-detect most defaults.</p>
           <div class="mt-4 overflow-hidden rounded-2xl border border-white/10 bg-black/20">
+            ${configDetailRow('File', payload.path || '.env')}
             ${configDetailRow('Recommended env', 'development')}
             ${configDetailRow('Recommended DB', 'devdb')}
             ${configDetailRow('Writable', payload.writable ? 'Yes' : 'No')}
@@ -2261,14 +2262,10 @@
 
     function renderLangLocaleControls(payload) {
       const locales = langLocaleOptions(payload);
-      const filter = $('langLocaleFilter');
       const copySource = $('langCopySource');
       const syncReference = $('langSyncReference');
       const syncTarget = $('langSyncTarget');
-      if (!filter || !copySource || !syncReference || !syncTarget) return;
-
-      filter.innerHTML = `<option value="all">All locales</option>${locales.map(locale => `<option value="${esc(locale)}">${esc(locale)}</option>`).join('')}`;
-      filter.value = locales.includes(state.langLocale) || state.langLocale === 'all' ? state.langLocale : 'all';
+      if (!copySource || !syncReference || !syncTarget) return;
 
       const localeOptions = locales.map(locale => `<option value="${esc(locale)}">${esc(locale)}</option>`).join('');
       copySource.innerHTML = localeOptions;
@@ -2283,6 +2280,43 @@
       if (targetLocale) syncTarget.value = targetLocale;
     }
 
+    function renderLangLocaleTabs(payload) {
+      const stats = payload.locale_stats || {};
+      const locales = langLocaleOptions(payload);
+      const total = Number(payload.summary?.total || 0);
+      const tabs = [['all', 'All locales', total]];
+      locales.forEach(locale => tabs.push([locale, locale.toUpperCase(), Number(stats[locale] || 0)]));
+      const el = $('langLocaleTabs');
+      if (!el) return;
+      el.innerHTML = tabs.map(([key, label, count]) => `<button onclick="setLangLocale('${esc(key)}')" class="rounded-xl border px-4 py-2 text-sm font-bold transition ${state.langLocale === key ? 'border-sky-300/40 bg-sky-500 text-white shadow-[0_12px_35px_rgba(14,165,233,.25)]' : 'border-white/10 bg-white/5 text-slate-300 hover:bg-white/10'}">${esc(label)} <span class="ml-2 rounded-lg bg-black/20 px-2 py-0.5 text-xs">${count.toLocaleString()}</span></button>`).join('');
+    }
+
+    function renderLangFileButton(file, index) {
+      return `<button onclick="selectLang(${index})" class="mb-1 flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm transition ${index === state.selectedLang ? 'bg-violet-500/22 text-white shadow-[0_10px_30px_rgba(124,58,237,.18)]' : 'text-slate-300 hover:bg-white/6'}">
+          <span class="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-white/10 ${file.scope === 'theme' ? 'bg-amber-400/10 text-amber-200' : 'bg-emerald-400/10 text-emerald-200'}">${esc((file.locale || '?').slice(0, 2).toUpperCase())}</span>
+          <span class="min-w-0 flex-1"><span class="block truncate font-bold">${esc(file.group || file.name)}</span><span class="mt-0.5 block truncate text-xs text-slate-500">${esc(file.path)}</span></span>
+          <span class="rounded-lg bg-white/8 px-2 py-1 text-[11px] font-bold text-slate-300">${esc(file.scope)}</span>
+        </button>`;
+    }
+
+    function renderLangFilesList(files) {
+      if (!files.length) {
+        return '<div class="p-6 text-center text-sm text-slate-500">No language files match your filter.</div>';
+      }
+      if (state.langLocale !== 'all') {
+        return files.map((file, index) => renderLangFileButton(file, index)).join('');
+      }
+      const groups = {};
+      files.forEach((file, index) => {
+        const locale = file.locale || 'unknown';
+        (groups[locale] ||= []).push({ file, index });
+      });
+      return Object.keys(groups).sort().map(locale => {
+        const items = groups[locale].map(item => renderLangFileButton(item.file, item.index)).join('');
+        return `<div class="mb-4"><div class="sticky top-0 z-10 border-b border-white/10 bg-[#091320] px-3 py-2 text-xs font-bold uppercase tracking-wide text-sky-300">${esc(locale)} <span class="text-slate-500">(${groups[locale].length})</span></div><div class="pt-1">${items}</div></div>`;
+      }).join('');
+    }
+
     function setLangLocale(locale) {
       state.langLocale = locale || 'all';
       state.selectedLang = 0;
@@ -2295,7 +2329,8 @@
       const files = filteredLangFiles();
       if (state.selectedLang >= files.length) state.selectedLang = 0;
       $('langTotalBadge').textContent = Number(payload.summary?.total || 0).toLocaleString();
-      renderLangTabs(payload.categories || {});
+      renderLangLocaleTabs(payload);
+      renderLangScopeTabs(payload.categories || {});
       renderLangLocaleControls(payload);
       $('langSummary').innerHTML = `
         ${smallCard('Language Files', payload.summary?.total || 0, 'translation packages', 'violet')}
@@ -2303,21 +2338,17 @@
         ${smallCard('App Files', payload.summary?.app || 0, 'app/lang', 'success')}
         ${smallCard('Theme Files', payload.summary?.theme || 0, 'theme language files', 'warn')}
       `;
-      $('langFiles').innerHTML = files.length ? files.map((file, index) => `
-        <button onclick="selectLang(${index})" class="mb-1 flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm transition ${index === state.selectedLang ? 'bg-violet-500/22 text-white shadow-[0_10px_30px_rgba(124,58,237,.18)]' : 'text-slate-300 hover:bg-white/6'}">
-          <span class="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-white/10 ${file.scope === 'theme' ? 'bg-amber-400/10 text-amber-200' : 'bg-emerald-400/10 text-emerald-200'}">${esc((file.locale || '?').slice(0, 2).toUpperCase())}</span>
-          <span class="min-w-0 flex-1"><span class="block truncate font-bold">${esc(file.group || file.name)}</span><span class="mt-0.5 block truncate text-xs text-slate-500">${esc(file.path)}</span></span>
-          <span class="rounded-lg bg-white/8 px-2 py-1 text-[11px] font-bold text-slate-300">${esc(file.scope)}</span>
-        </button>
-      `).join('') : '<div class="p-6 text-center text-sm text-slate-500">No language files match your filter.</div>';
+      $('langFiles').innerHTML = renderLangFilesList(files);
       const selected = files[state.selectedLang] || null;
       renderLangEditor(selected);
       renderLangDetails(selected);
     }
 
-    function renderLangTabs(categories) {
+    function renderLangScopeTabs(categories) {
       const tabs = [['all', 'All'], ['app', 'App'], ['theme', 'Theme']];
-      $('langTabs').innerHTML = tabs.map(([key, label]) => `<button onclick="setLangScope('${key}')" class="rounded-xl border px-4 py-2 text-sm font-bold transition ${state.langScope === key ? 'border-violet-300/40 bg-violet-500 text-white shadow-[0_12px_35px_rgba(124,58,237,.25)]' : 'border-white/10 bg-white/5 text-slate-300 hover:bg-white/10'}">${esc(label)} <span class="ml-2 rounded-lg bg-black/20 px-2 py-0.5 text-xs">${Number(categories[key] || 0).toLocaleString()}</span></button>`).join('');
+      const el = $('langScopeTabs') || $('langTabs');
+      if (!el) return;
+      el.innerHTML = tabs.map(([key, label]) => `<button onclick="setLangScope('${key}')" class="rounded-xl border px-3 py-1.5 text-xs font-bold transition ${state.langScope === key ? 'border-violet-300/40 bg-violet-500/80 text-white' : 'border-white/10 bg-white/5 text-slate-400 hover:bg-white/10'}">${esc(label)} <span class="ml-1 rounded-lg bg-black/20 px-1.5 py-0.5 text-[10px]">${Number(categories[key] || 0).toLocaleString()}</span></button>`).join('');
     }
 
     function setLangScope(scope) {
@@ -2550,7 +2581,7 @@
     }
 
     function renderConfigTabs(categories) {
-      const labels = [['all', 'All'], ['app', 'App'], ['theme', 'Theme']];
+      const labels = [['all', 'All'], ['platform', 'Platform'], ['app', 'App'], ['theme', 'Theme']];
       $('configTabs').innerHTML = labels.map(([key, label]) => {
         const active = state.configCategory === key;
         const count = Number(categories[key] || 0);
@@ -2680,7 +2711,7 @@
     }
 
     function configIcon(category) {
-      const name = category === 'database' ? 'database' : category === 'theme' ? 'package' : category === 'frontend' ? 'code' : category === 'services' ? 'settings' : category === 'app' ? 'package' : 'fileText';
+      const name = category === 'database' ? 'database' : category === 'platform' ? 'layers' : category === 'theme' ? 'package' : category === 'frontend' ? 'code' : category === 'services' ? 'settings' : category === 'app' ? 'package' : 'fileText';
       return icon(name, 'h-5 w-5');
     }
 
@@ -2977,7 +3008,7 @@
           <span>Showing 1 to ${Math.min(entries.length, 120).toLocaleString()} of ${entries.length.toLocaleString()} logs</span>
           <span class="rounded-xl border border-white/10 bg-white/5 px-3 py-1 text-xs font-bold text-slate-300">${esc(state.logLevel === 'all' ? 'All levels' : state.logLevel.toUpperCase())}</span>
         </div>
-      ` : '<div class="grid min-h-[420px] place-items-center p-8 text-center text-slate-500"><div><div class="text-lg font-bold text-slate-300">No logs found</div><div class="mt-2 text-sm">Try another level or search term.</div></div></div>';
+      ` : `<div class="grid min-h-[420px] place-items-center p-8 text-center text-slate-500"><div><div class="text-lg font-bold text-slate-300">No logs found</div><div class="mt-2 text-sm">${payload.dir_exists ? 'Try another level or search term.' : `Log directory is not available yet (${esc(payload.dir || 'storage/logs')}).`}</div></div></div>`;
       renderLogDetails(entries[state.selectedLog] || null);
     }
 
@@ -3377,7 +3408,6 @@
     $('themeSearch').oninput = (event) => { state.themeSearch = event.target.value || ''; state.selectedTheme = 0; renderThemes(); };
     $('viewSearch').oninput = (event) => { state.viewSearch = event.target.value || ''; state.selectedView = 0; renderViews(); };
     $('langSearch').oninput = (event) => { state.langSearch = event.target.value || ''; state.selectedLang = 0; state.langEditing = false; renderLang(); };
-    $('langLocaleFilter')?.addEventListener('change', (event) => setLangLocale(event.target.value || 'all'));
     $('langSyncReference')?.addEventListener('change', (event) => { state.langSyncReference = event.target.value || 'en'; });
     $('configSearch').oninput = (event) => { state.configSearch = event.target.value || ''; state.selectedConfig = 0; renderConfig(); };
     setReady(false);

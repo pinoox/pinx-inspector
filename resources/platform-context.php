@@ -251,6 +251,111 @@ function inspector_scope_root(string $platformRoot): string
     return $platformRoot . '/apps/' . $package;
 }
 
+function inspector_logs_dir(string $scopeRoot): string
+{
+    $scopeRoot = normalize_path($scopeRoot);
+    $platformRoot = inspector_platform_root_from_scope($scopeRoot);
+    $candidates = [
+        $platformRoot . '/storage/logs',
+        $scopeRoot . '/storage/logs',
+    ];
+
+    foreach ($candidates as $dir) {
+        if (is_dir($dir)) {
+            return normalize_path($dir);
+        }
+    }
+
+    return normalize_path($platformRoot . '/storage/logs');
+}
+
+function inspector_env_file_path(string $scopeRoot): string
+{
+    return normalize_path(inspector_env_root($scopeRoot) . '/.env');
+}
+
+function inspector_storage_dir(string $scopeRoot, string $relative = ''): string
+{
+    $scopeRoot = normalize_path($scopeRoot);
+    $platformRoot = inspector_platform_root_from_scope($scopeRoot);
+    $base = is_dir($platformRoot . '/storage') ? $platformRoot . '/storage' : $scopeRoot . '/storage';
+    $base = normalize_path($base);
+
+    if ($relative === '') {
+        return $base;
+    }
+
+    return normalize_path($base . '/' . trim(str_replace('\\', '/', $relative), '/'));
+}
+
+function inspector_vendor_dir(string $scopeRoot): string
+{
+    $platformRoot = inspector_platform_root_from_scope($scopeRoot);
+
+    if (is_dir($platformRoot . '/vendor')) {
+        return normalize_path($platformRoot . '/vendor');
+    }
+
+    if (is_dir($scopeRoot . '/vendor')) {
+        return normalize_path($scopeRoot . '/vendor');
+    }
+
+    return normalize_path($platformRoot . '/vendor');
+}
+
+function inspector_resolve_shared_path(string $scopeRoot, string $relative): string
+{
+    return resolve_project_path(inspector_platform_root_from_scope($scopeRoot), $relative);
+}
+
+function inspector_resolve_config_path(string $scopeRoot, string $relative): string
+{
+    $relative = trim(str_replace('\\', '/', $relative), '/');
+    $platformRoot = inspector_platform_root_from_scope($scopeRoot);
+
+    if ($relative !== '' && inspector_is_platform($platformRoot)) {
+        if (str_starts_with($relative, 'platform/')) {
+            return normalize_path($platformRoot . '/' . $relative);
+        }
+
+        if ($relative === 'composer.json' && is_file($platformRoot . '/composer.json')) {
+            return normalize_path($platformRoot . '/composer.json');
+        }
+    }
+
+    return normalize_path($scopeRoot . '/' . $relative);
+}
+
+function inspector_is_allowed_config_target(string $scopeRoot, string $target): bool
+{
+    $scopeRoot = normalize_path($scopeRoot);
+    $platformRoot = inspector_platform_root_from_scope($scopeRoot);
+    $target = normalize_path($target);
+
+    if (str_starts_with($target, $scopeRoot . '/')) {
+        return true;
+    }
+
+    return inspector_is_platform($platformRoot) && str_starts_with($target, $platformRoot . '/');
+}
+
+function inspector_scope_context(string $scopeRoot, ?string $platformRoot = null): array
+{
+    $platformRoot = normalize_path($platformRoot ?? inspector_platform_root_from_scope($scopeRoot));
+    $config = app_config($scopeRoot);
+
+    return [
+        'app_root' => normalize_path($scopeRoot),
+        'platform_root' => $platformRoot,
+        'is_platform' => inspector_is_platform($platformRoot),
+        'package' => (string) ($config['package'] ?? basename($scopeRoot)),
+        'logs_dir' => inspector_logs_dir($scopeRoot),
+        'env_file' => inspector_env_file_path($scopeRoot),
+        'storage_dir' => inspector_storage_dir($scopeRoot),
+        'vendor_dir' => inspector_vendor_dir($scopeRoot),
+    ];
+}
+
 function apps_payload(string $platformRoot): array
 {
     $platformRoot = normalize_path($platformRoot);

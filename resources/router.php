@@ -410,7 +410,7 @@ function connection_config(string $root): array
         $real = strtolower((string) ($env['DB_DRIVER'] ?? 'mysql'));
         if (!empty($env['DB_HOST']) && !empty($env['DB_DATABASE']) && !empty($env['DB_USERNAME']) && in_array($real, ['mysql', 'mariadb', 'pgsql'], true)) {
             $connection = $real;
-        } elseif (!empty($env['DB_DATABASE']) && is_file(resolve_project_path($root, (string) $env['DB_DATABASE']))) {
+        } elseif (!empty($env['DB_DATABASE']) && is_file(inspector_resolve_shared_path($root, (string) $env['DB_DATABASE']))) {
             $connection = 'sqlite';
         } else {
             $connection = 'devdb';
@@ -1572,7 +1572,7 @@ function pdo_for_connection(string $root, string $driver): PDO
     $env = connection_config($root)['env'];
 
     if ($driver === 'sqlite') {
-        $database = resolve_project_path($root, (string) ($env['DB_DATABASE'] ?? ''));
+        $database = inspector_resolve_shared_path($root, (string) ($env['DB_DATABASE'] ?? ''));
         return new PDO('sqlite:' . $database, null, null, [
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
@@ -2822,7 +2822,8 @@ function route_action_from_snippet(string $snippet): string
 
 function logs_payload(string $root): array
 {
-    $logDir = $root . '/storage/logs';
+    $context = inspector_scope_context($root);
+    $logDir = (string) ($context['logs_dir'] ?? inspector_logs_dir($root));
     $files = [];
     $totals = ['error' => 0, 'warning' => 0, 'info' => 0, 'debug' => 0];
 
@@ -2854,6 +2855,9 @@ function logs_payload(string $root): array
     return [
         'counts' => $totals,
         'files' => $files,
+        'dir' => $logDir,
+        'dir_exists' => is_dir($logDir),
+        'context' => $context,
     ];
 }
 
@@ -2863,8 +2867,8 @@ function log_file_path(string $root, string $name): string
     if ($name === '' || !str_ends_with(strtolower($name), '.log')) {
         throw new RuntimeException('Invalid log file name.');
     }
-    $path = normalize_path($root . '/storage/logs/' . $name);
-    $base = normalize_path($root . '/storage/logs');
+    $base = normalize_path(inspector_logs_dir($root));
+    $path = normalize_path($base . '/' . $name);
     if (!str_starts_with($path, $base . '/')) {
         throw new RuntimeException('Invalid log file path.');
     }
@@ -2874,7 +2878,8 @@ function log_file_path(string $root, string $name): string
 function clear_logs_payload(string $root, array $payload): array
 {
     $name = trim((string) ($payload['file'] ?? ''));
-    $files = $name !== '' ? [log_file_path($root, $name)] : glob($root . '/storage/logs/*.log');
+    $logDir = inspector_logs_dir($root);
+    $files = $name !== '' ? [log_file_path($root, $name)] : glob($logDir . '/*.log');
     $cleared = 0;
     foreach ($files ?: [] as $file) {
         if (!is_file($file) || !is_writable($file)) {
@@ -2914,7 +2919,9 @@ function delete_log_payload(string $root, array $payload): array
 
 function env_payload(string $root): array
 {
-    $file = $root . '/.env';
+    $context = inspector_scope_context($root);
+    $file = inspector_env_file_path($root);
+    $envRoot = normalize_path(inspector_env_root($root));
     $items = [];
     foreach (read_env($root) as $key => $value) {
         $items[] = [
@@ -2927,8 +2934,10 @@ function env_payload(string $root): array
 
     return [
         'exists' => is_file($file),
-        'writable' => is_file($file) ? is_writable($file) : is_writable($root),
-        'path' => '.env',
+        'writable' => is_file($file) ? is_writable($file) : is_writable($envRoot),
+        'path' => ltrim(str_replace(normalize_path((string) ($context['platform_root'] ?? $envRoot)), '', $file), '/') ?: '.env',
+        'absolute_path' => $file,
+        'context' => $context,
         'items' => $items,
         'suggested' => env_suggested_items(),
         'content' => is_file($file) ? (string) file_get_contents($file) : "APP_ENV=development\nDB_CONNECTION=devdb\n",
@@ -2972,8 +2981,9 @@ function env_group(string $key): string
 function save_env_payload(string $root, array $payload): array
 {
     $content = (string) ($payload['content'] ?? '');
-    $file = normalize_path($root . '/.env');
-    if (normalize_path(dirname($file)) !== normalize_path($root)) {
+    $file = inspector_env_file_path($root);
+    $envRoot = normalize_path(inspector_env_root($root));
+    if (normalize_path(dirname($file)) !== $envRoot) {
         throw new RuntimeException('Invalid .env path.');
     }
     if (is_file($file) && !is_writable($file)) {
@@ -3004,7 +3014,7 @@ function config_payload(string $root): array
 {
     $files = config_files_payload($root);
     $env = read_env($root);
-    $categories = ['all' => count($files), 'app' => 0, 'theme' => 0];
+    $categories = ['all' => count($files), 'app' => 0, 'theme' => 0, 'platform' => 0];
 
     foreach ($files as $file) {
         $category = (string) ($file['category'] ?? 'custom');
@@ -3174,9 +3184,10 @@ function build_payload(string $root): array
     $versionCode = (int) ($app['version-code'] ?? 1);
     $sign = is_array($app['pinx']['sign'] ?? null) ? $app['pinx']['sign'] : [];
     $keyPath = (string) ($sign['key'] ?? '');
-    $resolvedKeyPath = $keyPath !== '' ? resolve_project_path($root, $keyPath) : '';
+    $resolvedKeyPath = $keyPath !== '' ? inspector_resolve_shared_path($root, $keyPath) : '';
     $exportDir = $root . '/export';
     $exports = [];
+    $vendorDir = inspector_vendor_dir($root);
 
     if (is_dir($exportDir)) {
         foreach (glob($exportDir . '/*.{pinx,zip,json}', GLOB_BRACE) ?: [] as $file) {
@@ -3198,7 +3209,7 @@ function build_payload(string $root): array
     $pinker = pinker_payload($root);
     $checks = [
         ['label' => 'Manifest', 'value' => is_file($root . '/app.php') ? 'Ready' : 'Missing', 'ok' => is_file($root . '/app.php')],
-        ['label' => 'Composer vendor', 'value' => is_dir($root . '/vendor') ? 'Installed' : 'Missing', 'ok' => is_dir($root . '/vendor')],
+        ['label' => 'Composer vendor', 'value' => is_dir($vendorDir) ? 'Installed' : 'Missing', 'ok' => is_dir($vendorDir)],
         ['label' => 'Pinker cache', 'value' => is_dir($root . '/pinker') ? 'Ready' : 'Not built', 'ok' => is_dir($root . '/pinker')],
         ['label' => 'Export folder', 'value' => is_dir($exportDir) ? 'Ready' : 'Created on build', 'ok' => true],
         ['label' => 'Signing', 'value' => !empty($sign['enabled']) ? 'Enabled' : 'Disabled', 'ok' => empty($sign['enabled']) || ($resolvedKeyPath !== '' && is_file($resolvedKeyPath)) || !empty($sign['key_id'])],
@@ -3232,7 +3243,10 @@ function build_payload(string $root): array
             'app' => normalize_path($root),
             'manifest' => normalize_path($root . '/app.php'),
             'export' => normalize_path($exportDir),
+            'vendor' => $vendorDir,
+            'storage' => inspector_storage_dir($root),
         ],
+        'context' => inspector_scope_context($root),
     ];
 }
 
@@ -3255,7 +3269,7 @@ function build_sign_payload(string $root, array $payload): array
 
     $app['pinx'] = is_array($app['pinx'] ?? null) ? $app['pinx'] : [];
     $sign = is_array($app['pinx']['sign'] ?? null) ? $app['pinx']['sign'] : [];
-    $keyDir = $root . '/storage/pinx/signing';
+    $keyDir = inspector_storage_dir($root, 'pinx/signing');
     $keyFile = $keyDir . '/development.sign.key';
     $relativeKey = 'storage/pinx/signing/development.sign.key';
 
@@ -4044,6 +4058,7 @@ function lang_payload(string $root): array
         'files' => $files,
         'locales' => $locales,
         'locale_stats' => lang_locale_stats($files),
+        'groups' => lang_locale_groups($files),
         'categories' => [
             'all' => count($files),
             'app' => count(array_filter($files, static fn (array $file): bool => ($file['scope'] ?? '') === 'app')),
@@ -4217,7 +4232,7 @@ function save_lang_payload(string $root, array $payload): array
 
 function config_files_payload(string $root): array
 {
-    $candidates = [];
+    $entries = [];
     $patterns = [
         'app.php',
         'theme.php',
@@ -4237,13 +4252,43 @@ function config_files_payload(string $root): array
             if (!is_file($file) || config_path_ignored($root, $file)) {
                 continue;
             }
-            $candidates[normalize_path($file)] = $file;
+            $entries[normalize_path($file)] = [
+                'file' => $file,
+                'relative' => ltrim(str_replace(normalize_path($root), '', normalize_path($file)), '/'),
+            ];
+        }
+    }
+
+    $platformRoot = inspector_platform_root_from_scope($root);
+    if (inspector_is_platform($platformRoot)) {
+        foreach (['platform/*.php', 'platform/**/*.php'] as $pattern) {
+            foreach (glob($platformRoot . '/' . $pattern) ?: [] as $file) {
+                if (!is_file($file)) {
+                    continue;
+                }
+                $entries[normalize_path($file)] = [
+                    'file' => $file,
+                    'relative' => ltrim(str_replace(normalize_path($platformRoot), '', normalize_path($file)), '/'),
+                ];
+            }
+        }
+
+        $composer = $platformRoot . '/composer.json';
+        if (is_file($composer)) {
+            $entries[normalize_path($composer)] = [
+                'file' => $composer,
+                'relative' => 'composer.json',
+            ];
         }
     }
 
     $files = [];
-    foreach ($candidates as $file) {
-        $relative = ltrim(str_replace(normalize_path($root), '', normalize_path($file)), '/');
+    foreach ($entries as $entry) {
+        $file = (string) ($entry['file'] ?? '');
+        $relative = (string) ($entry['relative'] ?? '');
+        if ($file === '' || $relative === '' || !is_file($file)) {
+            continue;
+        }
         $content = (string) file_get_contents($file);
         $category = config_category($relative);
         $files[] = [
@@ -4264,7 +4309,7 @@ function config_files_payload(string $root): array
     }
 
     usort($files, static function (array $a, array $b): int {
-        $rank = ['app' => 0, 'database' => 1, 'theme' => 2, 'frontend' => 3, 'services' => 4, 'custom' => 5];
+        $rank = ['app' => 0, 'platform' => 1, 'database' => 2, 'theme' => 3, 'frontend' => 4, 'services' => 5, 'custom' => 6];
         return (($rank[$a['category']] ?? 9) <=> ($rank[$b['category']] ?? 9)) ?: strcmp((string) $a['path'], (string) $b['path']);
     });
 
@@ -4284,9 +4329,8 @@ function save_config_payload(string $root, array $payload): array
         $allowed[(string) ($file['path'] ?? '')] = true;
     }
 
-    $target = normalize_path($root . '/' . $relative);
-    $rootPath = normalize_path($root);
-    if (!isset($allowed[$relative]) || !str_starts_with($target, $rootPath . '/') || !is_file($target)) {
+    $target = inspector_resolve_config_path($root, $relative);
+    if (!isset($allowed[$relative]) || !inspector_is_allowed_config_target($root, $target) || !is_file($target)) {
         throw new RuntimeException('This file is not an editable config file in the current project.');
     }
 
@@ -4339,6 +4383,7 @@ function config_category(string $relative): string
 {
     $path = strtolower(str_replace('\\', '/', $relative));
     $name = basename($path);
+    if (str_starts_with($path, 'platform/') || $name === 'composer.json') return 'platform';
     if ($name === 'app.php' || $name === 'app.config.php') return 'app';
     if (str_contains($name, 'database') || str_contains($name, 'db')) return 'database';
     if (str_contains($path, '/theme/') || $name === 'theme.php') return 'theme';

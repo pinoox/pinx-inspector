@@ -9,11 +9,9 @@
               </div>
               <div class="ux-actions"><button onclick="loadLang()" class="ux-btn">Refresh</button></div>
             </div>
-            <div id="langTabs" class="mb-4 flex flex-wrap gap-2"></div>
+            <div id="langLocaleTabs" class="mb-3 flex flex-wrap gap-2"></div>
+            <div id="langScopeTabs" class="mb-4 flex flex-wrap gap-2"></div>
             <div class="mb-4 grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-3 rounded-2xl border border-white/10 bg-black/20 p-4 max-xl:grid-cols-1">
-              <label class="text-xs text-slate-400">Locale filter
-                <select id="langLocaleFilter" class="ux-filter mt-2 w-full"></select>
-              </label>
               <label class="text-xs text-slate-400">Copy from
                 <select id="langCopySource" class="ux-filter mt-2 w-full"></select>
               </label>
