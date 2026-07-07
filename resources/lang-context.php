@@ -2,33 +2,6 @@
 
 declare(strict_types=1);
 
-function lang_locale_stats(array $files): array
-{
-    $stats = [];
-    foreach ($files as $file) {
-        $locale = (string) ($file['locale'] ?? 'unknown');
-        $stats[$locale] = ($stats[$locale] ?? 0) + 1;
-    }
-    ksort($stats);
-
-    return $stats;
-}
-
-function lang_locale_groups(array $files): array
-{
-    $groups = [];
-    foreach ($files as $file) {
-        $locale = (string) ($file['locale'] ?? 'unknown');
-        if (!isset($groups[$locale])) {
-            $groups[$locale] = [];
-        }
-        $groups[$locale][] = $file;
-    }
-    ksort($groups);
-
-    return $groups;
-}
-
 function lang_validate_locale(string $locale): string
 {
     $locale = strtolower(trim($locale));
@@ -255,6 +228,22 @@ function lang_locale_stats(array $files): array
     ksort($stats);
 
     return $stats;
+}
+
+function lang_locale_groups(array $files): array
+{
+    $groups = [];
+    foreach ($files as $file) {
+        $locale = (string) ($file['locale'] ?? 'unknown');
+        if (!isset($groups[$locale])) {
+            $groups[$locale] = [];
+        }
+        $groups[$locale][] = $file;
+    }
+
+    ksort($groups);
+
+    return $groups;
 }
 
 function copy_lang_locale_payload(string $root, array $payload): array
