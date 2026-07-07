@@ -3,9 +3,9 @@
           <div class="min-w-0">
             <div class="ux-page-head">
               <div>
-                <div class="ux-page-kicker">Application / Middleware</div>
+                <div class="ux-page-kicker">Application / Flow</div>
                 <h2 class="ux-page-title">Flow</h2>
-                <p class="ux-page-copy">Understand middleware groups, execution order, route usage, and the global stack without jumping into files.</p>
+                <p class="ux-page-copy">Understand flow classes, execution order, route usage, and the global stack without jumping into files.</p>
               </div>
               <div class="ux-actions"><button onclick="loadFlow()" class="ux-btn">Refresh</button></div>
             </div>
@@ -14,7 +14,7 @@
             <div class="grid grid-cols-[1fr_330px] gap-4 max-xl:grid-cols-1">
               <div>
                 <div class="ux-toolbar grid grid-cols-[1fr_150px_150px] max-xl:grid-cols-1">
-                  <div class="relative"><span class="pointer-events-none absolute left-3 top-2.5 text-slate-500">?</span><input id="flowSearch" class="ux-filter w-full pl-9" placeholder="Search middleware..."></div>
+                  <div class="relative"><span class="pointer-events-none absolute left-3 top-2.5 text-slate-500">?</span><input id="flowSearch" class="ux-filter w-full pl-9" placeholder="Search flow..."></div>
                   <select id="flowTypeFilter" class="ux-filter"><option value="all">All Types</option></select>
                   <select id="flowStatusFilter" class="ux-filter"><option value="all">All Status</option><option value="enabled">Enabled</option><option value="disabled">Disabled</option></select>
                 </div>

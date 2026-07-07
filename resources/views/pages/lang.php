@@ -10,6 +10,29 @@
               <div class="ux-actions"><button onclick="loadLang()" class="ux-btn">Refresh</button></div>
             </div>
             <div id="langTabs" class="mb-4 flex flex-wrap gap-2"></div>
+            <div class="mb-4 grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-3 rounded-2xl border border-white/10 bg-black/20 p-4 max-xl:grid-cols-1">
+              <label class="text-xs text-slate-400">Locale filter
+                <select id="langLocaleFilter" class="ux-filter mt-2 w-full"></select>
+              </label>
+              <label class="text-xs text-slate-400">Copy from
+                <select id="langCopySource" class="ux-filter mt-2 w-full"></select>
+              </label>
+              <label class="text-xs text-slate-400">New locale
+                <input id="langCopyTarget" class="ux-filter mt-2 w-full" placeholder="ar">
+              </label>
+              <div class="flex items-end gap-2">
+                <button onclick="copyLangLocale()" class="ux-btn w-full">Copy locale</button>
+              </div>
+              <label class="text-xs text-slate-400">Sync reference
+                <select id="langSyncReference" class="ux-filter mt-2 w-full"></select>
+              </label>
+              <label class="text-xs text-slate-400">Target locale
+                <select id="langSyncTarget" class="ux-filter mt-2 w-full"></select>
+              </label>
+              <div class="flex items-end gap-2">
+                <button onclick="syncLangLocale()" class="ux-btn w-full">Sync missing keys</button>
+              </div>
+            </div>
             <div class="ux-toolbar">
               <div class="relative min-w-72 max-lg:min-w-0">
                 <span class="pointer-events-none absolute left-3 top-2.5 text-slate-500">?</span>

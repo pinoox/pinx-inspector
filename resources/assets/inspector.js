@@ -1,4 +1,4 @@
-    const state = { selected: null, selectedRowKeys: [], limit: 50, offset: 0, search: '', tableFilter: '', view: 'dashboard', tables: [], database: null, selectedConnectionIndex: 0, connectionDetailTab: 'details', queryTable: '', queryColumns: [], querySelectedColumns: [], queryConditions: [], queryRows: [], queryBuilderMode: 'builder', queryPanelTab: 'results', queryLastPayload: null, queryLastExecutedAt: '', queryHistory: [], queryRawSql: '', queryRawResult: null, savedQueries: [], routes: null, routeSearch: '', routeGroup: 'all', selectedRoute: 0, selectedAction: 0, flow: null, flowSearch: '', flowTab: 'middleware', flowType: 'all', flowStatus: 'all', flowGroup: 'web', selectedFlow: 0, migrations: null, migrationSearch: '', migrationStatus: 'all', selectedMigration: 0, migrationDetailTab: 'sql', migrationActionMenu: null, schedule: null, scheduleSearch: '', scheduleStatus: 'all', selectedSchedule: 0, logs: null, logSearch: '', logLevel: 'all', selectedLog: 0, logLive: false, themes: null, themeSearch: '', selectedTheme: 0, pinker: null, pinkerTab: 'overview', build: null, views: null, viewSearch: '', viewType: 'all', selectedView: 0, viewEditing: false, lang: null, langSearch: '', langScope: 'all', selectedLang: 0, langEditing: false, env: null, config: null, configSearch: '', configCategory: 'all', selectedConfig: 0, configEditing: false, busy: false, ready: false, loaded: {}, loading: {}, platform: false, activePackage: '', apps: [] };
+    const state = { selected: null, selectedRowKeys: [], limit: 50, offset: 0, search: '', tableFilter: '', view: 'dashboard', tables: [], database: null, selectedConnectionIndex: 0, connectionDetailTab: 'details', queryTable: '', queryColumns: [], querySelectedColumns: [], queryConditions: [], queryRows: [], queryBuilderMode: 'builder', queryPanelTab: 'results', queryLastPayload: null, queryLastExecutedAt: '', queryHistory: [], queryRawSql: '', queryRawResult: null, savedQueries: [], routes: null, routeSearch: '', routeGroup: 'all', selectedRoute: 0, selectedAction: 0, flow: null, flowSearch: '', flowTab: 'flow', flowType: 'all', flowStatus: 'all', flowGroup: 'web', selectedFlow: 0, migrations: null, migrationSearch: '', migrationStatus: 'all', selectedMigration: 0, migrationDetailTab: 'sql', migrationActionMenu: null, schedule: null, scheduleSearch: '', scheduleStatus: 'all', selectedSchedule: 0, logs: null, logSearch: '', logLevel: 'all', selectedLog: 0, logLive: false, themes: null, themeSearch: '', selectedTheme: 0, pinker: null, pinkerTab: 'overview', build: null, views: null, viewSearch: '', viewType: 'all', selectedView: 0, viewEditing: false, lang: null, langSearch: '', langScope: 'all', langLocale: 'all', langSyncReference: 'en', selectedLang: 0, langEditing: false, env: null, config: null, configSearch: '', configCategory: 'all', selectedConfig: 0, configEditing: false, busy: false, ready: false, loaded: {}, loading: {}, platform: false, activePackage: '', apps: [] };
     const $ = (id) => document.getElementById(id);
     const base = location.pathname.startsWith('/~inspector') ? '/~inspector' : '';
     const packageStorageKey = 'pinx.inspector.package';
@@ -204,8 +204,8 @@
         setHtml('routesContent', loadingPanel('Loading routes', 'Reading route files and actions.'));
         setHtml('routeDetails', compactLoading('Loading route details'));
       } else if (view === 'flow') {
-        setHtml('flowContent', loadingPanel('Loading middleware flow', 'Reading middleware groups, priority, and route usage.'));
-        setHtml('flowDetails', compactLoading('Loading middleware details'));
+        setHtml('flowContent', loadingPanel('Loading flow', 'Reading flow classes, priority, and route usage.'));
+        setHtml('flowDetails', compactLoading('Loading flow details'));
       } else if (view === 'schedule') {
         setHtml('scheduleContent', loadingPanel('Loading schedule', 'Reading scheduled jobs and next runs.'));
         setHtml('scheduleDetails', compactLoading('Loading job details'));
@@ -2249,9 +2249,45 @@
       const query = state.langSearch.trim().toLowerCase();
       return (state.lang?.files || []).filter(file => {
         if (state.langScope !== 'all' && file.scope !== state.langScope) return false;
+        if (state.langLocale !== 'all' && file.locale !== state.langLocale) return false;
         if (!query) return true;
         return [file.name, file.path, file.scope, file.package, file.locale, file.group, file.content].join(' ').toLowerCase().includes(query);
       });
+    }
+
+    function langLocaleOptions(payload) {
+      return Array.isArray(payload?.locales) ? payload.locales.filter(Boolean) : [];
+    }
+
+    function renderLangLocaleControls(payload) {
+      const locales = langLocaleOptions(payload);
+      const filter = $('langLocaleFilter');
+      const copySource = $('langCopySource');
+      const syncReference = $('langSyncReference');
+      const syncTarget = $('langSyncTarget');
+      if (!filter || !copySource || !syncReference || !syncTarget) return;
+
+      filter.innerHTML = `<option value="all">All locales</option>${locales.map(locale => `<option value="${esc(locale)}">${esc(locale)}</option>`).join('')}`;
+      filter.value = locales.includes(state.langLocale) || state.langLocale === 'all' ? state.langLocale : 'all';
+
+      const localeOptions = locales.map(locale => `<option value="${esc(locale)}">${esc(locale)}</option>`).join('');
+      copySource.innerHTML = localeOptions;
+      syncReference.innerHTML = localeOptions;
+      syncTarget.innerHTML = localeOptions;
+
+      if (!locales.includes(copySource.value) && locales[0]) copySource.value = locales[0];
+      if (!locales.includes(state.langSyncReference) && locales[0]) state.langSyncReference = locales[0];
+      syncReference.value = locales.includes(state.langSyncReference) ? state.langSyncReference : (locales[0] || 'en');
+
+      const targetLocale = state.langLocale !== 'all' ? state.langLocale : (locales.find(locale => locale !== syncReference.value) || locales[0] || '');
+      if (targetLocale) syncTarget.value = targetLocale;
+    }
+
+    function setLangLocale(locale) {
+      state.langLocale = locale || 'all';
+      state.selectedLang = 0;
+      state.langEditing = false;
+      renderLang();
     }
 
     function renderLang() {
@@ -2260,6 +2296,7 @@
       if (state.selectedLang >= files.length) state.selectedLang = 0;
       $('langTotalBadge').textContent = Number(payload.summary?.total || 0).toLocaleString();
       renderLangTabs(payload.categories || {});
+      renderLangLocaleControls(payload);
       $('langSummary').innerHTML = `
         ${smallCard('Language Files', payload.summary?.total || 0, 'translation packages', 'violet')}
         ${smallCard('Locales', payload.summary?.locales || 0, (payload.locales || []).join(', ') || 'none', 'blue')}
@@ -2317,6 +2354,7 @@
             <button onclick="cancelLangEdit()" class="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-bold text-slate-200 hover:bg-white/10">Cancel</button>
           ` : `
             <button onclick="startLangEdit()" ${editDisabled ? 'disabled' : ''} class="rounded-xl border border-violet-300/25 bg-violet-400/10 px-3 py-2 text-xs font-bold text-violet-200 hover:bg-violet-400/15 disabled:cursor-not-allowed disabled:opacity-45">Edit</button>
+            <button onclick="syncLangFile()" class="rounded-xl border border-sky-300/25 bg-sky-400/10 px-3 py-2 text-xs font-bold text-sky-200 hover:bg-sky-400/15">Sync keys</button>
             <button onclick="loadLang()" class="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-bold text-slate-200 hover:bg-white/10">Refresh</button>
           `}
         </div>
@@ -2391,10 +2429,88 @@
           <h3 class="font-bold text-white">Quick Actions</h3>
           <div class="mt-4 grid gap-2">
             <button onclick="startLangEdit()" class="rounded-xl bg-violet-500 px-4 py-3 text-left text-sm font-bold text-white hover:bg-violet-400">Edit Language File</button>
+            <button onclick="syncLangFile()" class="rounded-xl border border-sky-300/25 bg-sky-400/10 px-4 py-3 text-left text-sm font-bold text-sky-200 hover:bg-sky-400/15">Sync Missing Keys</button>
             <button onclick="loadLang()" class="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-left text-sm font-bold text-slate-200 hover:bg-white/10">Refresh Lang</button>
           </div>
         </div>
       `;
+    }
+
+    async function copyLangLocale() {
+      const source = $('langCopySource')?.value || '';
+      const target = ($('langCopyTarget')?.value || '').trim().toLowerCase();
+      if (!source || !target) {
+        showOperation('warn', 'Copy locale', 'Choose a source locale and enter a new locale code.');
+        return;
+      }
+      if (!confirm(`Copy all ${source} language files to new locale "${target}"? Existing files will be skipped.`)) return;
+      setBusy(true, 'Copying locale', `${source} -> ${target}`);
+      try {
+        const result = await post('/api/lang/copy-locale', { source_locale: source, target_locale: target, scope: state.langScope === 'all' ? 'all' : state.langScope });
+        if (result.error) throw new Error(result.message || 'Locale copy failed.');
+        showOperation('success', 'Locale copied', result.message || 'Language files were copied.');
+        state.langLocale = target;
+        await loadLang();
+      } catch (error) {
+        showOperation('danger', 'Copy locale failed', error.message || 'Unable to copy locale.');
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    async function syncLangFile() {
+      const file = currentLangFile();
+      const reference = $('langSyncReference')?.value || state.langSyncReference || 'en';
+      if (!file) {
+        showOperation('warn', 'Sync keys', 'Select a language file first.');
+        return;
+      }
+      setBusy(true, 'Syncing language keys', file.path);
+      try {
+        const result = await post('/api/lang/sync', { path: file.path, reference_locale: reference });
+        if (result.error) throw new Error(result.message || 'Sync failed.');
+        showOperation(result.added ? 'success' : 'blue', 'Language sync', result.message || 'Sync finished.');
+        await loadLang();
+        const files = filteredLangFiles();
+        const index = files.findIndex(item => item.path === file.path);
+        if (index >= 0) state.selectedLang = index;
+        renderLang();
+      } catch (error) {
+        showOperation('danger', 'Sync failed', error.message || 'Unable to sync language keys.');
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    async function syncLangLocale() {
+      const reference = $('langSyncReference')?.value || state.langSyncReference || 'en';
+      const target = $('langSyncTarget')?.value || (state.langLocale !== 'all' ? state.langLocale : '');
+      if (!reference || !target) {
+        showOperation('warn', 'Sync locale', 'Choose reference and target locales.');
+        return;
+      }
+      if (reference === target) {
+        showOperation('warn', 'Sync locale', 'Reference and target locale must be different.');
+        return;
+      }
+      if (!confirm(`Add missing keys from "${reference}" into all "${target}" language files?`)) return;
+      setBusy(true, 'Syncing locale', `${reference} -> ${target}`);
+      try {
+        const result = await post('/api/lang/sync-locale', {
+          reference_locale: reference,
+          target_locale: target,
+          scope: state.langScope === 'all' ? 'all' : state.langScope,
+        });
+        if (result.error) throw new Error(result.message || 'Locale sync failed.');
+        showOperation('success', 'Locale synced', result.message || 'Missing keys were added.');
+        state.langLocale = target;
+        state.langSyncReference = reference;
+        await loadLang();
+      } catch (error) {
+        showOperation('danger', 'Locale sync failed', error.message || 'Unable to sync locale.');
+      } finally {
+        setBusy(false);
+      }
     }
 
     async function loadConfig() {
@@ -2598,7 +2714,7 @@
       if (state.selectedFlow >= items.length) state.selectedFlow = 0;
       renderFlowTabs();
       $('flowSummary').innerHTML = `
-        ${smallCard('Total Middleware', payload.summary?.total || 0, '', 'violet')}
+        ${smallCard('Total Flow', payload.summary?.total || 0, '', 'violet')}
         ${smallCard('Enabled', payload.summary?.enabled || 0, '', 'success')}
         ${smallCard('Global', payload.summary?.global || 0, '', 'warn')}
         ${smallCard('Groups', payload.summary?.groups || 0, '', 'blue')}
@@ -2613,15 +2729,15 @@
     }
 
     function renderFlowTabs() {
-      const tabs = ['Middleware', 'Groups', 'Pipeline', 'Priority', 'Global Stack'];
+      const tabs = ['Flow', 'Groups', 'Pipeline', 'Priority', 'Global Stack'];
       $('flowTabs').innerHTML = tabs.map(label => {
-        const key = label.toLowerCase().replace(' ', '_');
+        const key = label.toLowerCase().replace(/ /g, '_');
         return `<button onclick="setFlowTab('${key}')" class="border-b-2 px-1 pb-3 text-sm font-bold transition ${state.flowTab === key ? 'border-violet-400 text-violet-300' : 'border-transparent text-slate-400 hover:text-slate-200'}">${esc(label)}</button>`;
       }).join('');
     }
 
     function setFlowTab(tab) {
-      state.flowTab = tab || 'middleware';
+      state.flowTab = tab || 'flow';
       state.selectedFlow = 0;
       renderFlow();
     }
@@ -2637,7 +2753,7 @@
     function renderFlowMiddlewareTable(items) {
       $('flowContent').innerHTML = items.length ? `
         <table class="w-full min-w-[820px] text-left text-sm"><thead class="bg-white/[.04] text-xs uppercase tracking-wide text-slate-400"><tr><th class="px-4 py-4">Flow</th><th class="px-4 py-4">Type</th><th class="px-4 py-4">Group</th><th class="px-4 py-4">Priority</th><th class="px-4 py-4">Status</th><th class="px-4 py-4">Applied</th></tr></thead><tbody class="divide-y divide-white/10">${items.map((item, index) => flowTableRow(item, index)).join('')}</tbody></table><div class="border-t border-white/10 px-4 py-4 text-sm text-slate-400">Showing 1 to ${items.length} of ${items.length} flow classes</div>
-      ` : '<div class="grid min-h-[420px] place-items-center p-8 text-center text-slate-500">No middleware found.</div>';
+      ` : '<div class="grid min-h-[420px] place-items-center p-8 text-center text-slate-500">No flow classes found.</div>';
     }
 
     function flowTableRow(item, index) {
@@ -2651,8 +2767,8 @@
         groups[group] = groups[group] || [];
         groups[group].push(item);
       });
-      const rows = Object.entries(groups).map(([group, groupItems]) => `<button onclick="state.flowGroup='${esc(group)}'; setFlowTab('pipeline')" class="block w-full border-b border-white/10 px-4 py-4 text-left hover:bg-white/[.04]"><div class="flex items-center justify-between gap-3"><div><div class="font-bold text-white">${esc(group)}</div><div class="mt-1 text-sm text-slate-500">${groupItems.length} middleware | ${groupItems.reduce((sum, item) => sum + Number(item.applied_routes || 0), 0)} applied routes</div></div><span class="rounded-xl bg-violet-500/15 px-3 py-1 text-xs font-bold text-violet-200">Open pipeline</span></div></button>`).join('');
-      $('flowContent').innerHTML = rows || '<div class="grid min-h-[420px] place-items-center p-8 text-center text-slate-500">No middleware groups found.</div>';
+      const rows = Object.entries(groups).map(([group, groupItems]) => `<button onclick="state.flowGroup='${esc(group)}'; setFlowTab('pipeline')" class="block w-full border-b border-white/10 px-4 py-4 text-left hover:bg-white/[.04]"><div class="flex items-center justify-between gap-3"><div><div class="font-bold text-white">${esc(group)}</div><div class="mt-1 text-sm text-slate-500">${groupItems.length} flow classes | ${groupItems.reduce((sum, item) => sum + Number(item.applied_routes || 0), 0)} applied routes</div></div><span class="rounded-xl bg-violet-500/15 px-3 py-1 text-xs font-bold text-violet-200">Open pipeline</span></div></button>`).join('');
+      $('flowContent').innerHTML = rows || '<div class="grid min-h-[420px] place-items-center p-8 text-center text-slate-500">No flow groups found.</div>';
     }
 
     function renderFlowPipelineTable(items) {
@@ -2664,12 +2780,12 @@
 
     function renderFlowPriority(items) {
       const sorted = [...items].sort((a, b) => Number(a.priority || 0) - Number(b.priority || 0));
-      $('flowContent').innerHTML = sorted.length ? `<table class="w-full min-w-[760px] text-left text-sm"><thead class="bg-white/[.04] text-xs uppercase tracking-wide text-slate-400"><tr><th class="px-4 py-4">Priority</th><th class="px-4 py-4">Middleware</th><th class="px-4 py-4">Group</th><th class="px-4 py-4">Routes</th></tr></thead><tbody class="divide-y divide-white/10">${sorted.map(item => `<tr class="hover:bg-white/[.04]"><td class="px-4 py-4 font-black text-violet-200">${esc(item.priority)}</td><td class="px-4 py-4"><div class="font-bold text-white">${esc(item.name)}</div><div class="mt-1 text-xs text-slate-500">${esc(item.class)}</div></td><td class="px-4 py-4 text-slate-300">${esc(item.group)}</td><td class="px-4 py-4 text-slate-300">${esc(item.global ? 'Global' : item.applied_routes + ' routes')}</td></tr>`).join('')}</tbody></table>` : '<div class="grid min-h-[420px] place-items-center p-8 text-center text-slate-500">No priority data found.</div>';
+      $('flowContent').innerHTML = sorted.length ? `<table class="w-full min-w-[760px] text-left text-sm"><thead class="bg-white/[.04] text-xs uppercase tracking-wide text-slate-400"><tr><th class="px-4 py-4">Priority</th><th class="px-4 py-4">Flow</th><th class="px-4 py-4">Group</th><th class="px-4 py-4">Routes</th></tr></thead><tbody class="divide-y divide-white/10">${sorted.map(item => `<tr class="hover:bg-white/[.04]"><td class="px-4 py-4 font-black text-violet-200">${esc(item.priority)}</td><td class="px-4 py-4"><div class="font-bold text-white">${esc(item.name)}</div><div class="mt-1 text-xs text-slate-500">${esc(item.class)}</div></td><td class="px-4 py-4 text-slate-300">${esc(item.group)}</td><td class="px-4 py-4 text-slate-300">${esc(item.global ? 'Global' : item.applied_routes + ' routes')}</td></tr>`).join('')}</tbody></table>` : '<div class="grid min-h-[420px] place-items-center p-8 text-center text-slate-500">No priority data found.</div>';
     }
 
     function renderFlowGlobalStack(items) {
       const globals = items.filter(item => item.global || item.group === 'global');
-      $('flowContent').innerHTML = globals.length ? `<div class="divide-y divide-white/10">${globals.map((item, index) => `<button onclick="selectFlow(${items.indexOf(item)})" class="block w-full px-4 py-4 text-left hover:bg-white/[.04]"><div class="flex items-center justify-between gap-3"><div><div class="font-bold text-white">${esc(item.name)}</div><div class="mt-1 text-xs text-slate-500">${esc(item.class)}</div></div><span class="rounded-xl bg-emerald-400/10 px-3 py-1 text-xs font-bold text-emerald-300">Global #${index + 1}</span></div></button>`).join('')}</div>` : '<div class="grid min-h-[420px] place-items-center p-8 text-center text-slate-500">No global middleware detected.</div>';
+      $('flowContent').innerHTML = globals.length ? `<div class="divide-y divide-white/10">${globals.map((item, index) => `<button onclick="selectFlow(${items.indexOf(item)})" class="block w-full px-4 py-4 text-left hover:bg-white/[.04]"><div class="flex items-center justify-between gap-3"><div><div class="font-bold text-white">${esc(item.name)}</div><div class="mt-1 text-xs text-slate-500">${esc(item.class)}</div></div><span class="rounded-xl bg-emerald-400/10 px-3 py-1 text-xs font-bold text-emerald-300">Global #${index + 1}</span></div></button>`).join('')}</div>` : '<div class="grid min-h-[420px] place-items-center p-8 text-center text-slate-500">No global flow classes detected.</div>';
     }
 
     function renderFlowPipeline(items) {
@@ -2696,19 +2812,19 @@
 
     function renderFlowDetails(item) {
       if (!item) {
-        $('flowDetails').innerHTML = '<div class="rounded-3xl border border-dashed border-white/10 p-6 text-center text-slate-500">Select middleware to inspect details.</div>';
+        $('flowDetails').innerHTML = '<div class="rounded-3xl border border-dashed border-white/10 p-6 text-center text-slate-500">Select a flow class to inspect details.</div>';
         return;
       }
       const routes = item.routes || [];
       $('flowDetails').innerHTML = `
-        <div class="rounded-3xl border border-white/10 bg-[#091320]/90 p-4 shadow-[0_18px_70px_rgba(0,0,0,.22)]"><div class="mb-4 flex items-start justify-between"><h3 class="font-bold text-white">Middleware Details</h3><button onclick="renderFlowDetails(null)" class="rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-sm font-bold text-slate-300 hover:bg-white/10">Close</button></div><div class="flex items-center gap-3"><span class="grid h-14 w-14 place-items-center rounded-2xl ${flowTypeTone(item.type)}">${icon(item.type === 'auth' || item.type === 'security' ? 'shield' : 'activity', 'h-6 w-6')}</span><div><div class="font-black text-white">${esc(item.name)} ${flowStatusBadge(item.status)}</div><div class="mt-1 text-sm text-slate-500">${esc(item.class)}</div></div></div><div class="mt-5 overflow-hidden rounded-2xl border border-white/10 bg-black/20">${configDetailRow('Type', item.type)}${configDetailRow('Group', item.group)}${configDetailRow('Priority', item.priority)}${configDetailRow('Applied To', item.global ? 'Global' : item.applied_routes + ' routes')}${configDetailRow('Global', item.global ? 'Yes' : 'No')}${configDetailRow('Updated', item.updated_at)}</div><p class="mt-4 text-sm leading-relaxed text-slate-300">${esc(item.description)}</p></div>
-        <div class="rounded-3xl border border-white/10 bg-[#091320]/90 p-4 shadow-[0_18px_70px_rgba(0,0,0,.22)]"><h3 class="font-bold text-white">Runs On Routes</h3><div class="mt-4 max-h-80 space-y-2 overflow-auto">${routes.length ? routes.map(route => `<div class="rounded-xl border border-white/10 bg-black/20 px-3 py-2"><div class="font-bold text-slate-100">${esc(route.method)} ${esc(route.uri || '/')}</div><div class="mt-1 truncate text-xs text-slate-500">${esc(route.name || route.action || route.file || '')}${route.line ? ' | Line ' + esc(route.line) : ''}</div></div>`).join('') : '<div class="text-sm text-slate-500">No route was matched for this middleware group.</div>'}</div></div>
-        <div class="rounded-3xl border border-white/10 bg-[#091320]/90 p-4 shadow-[0_18px_70px_rgba(0,0,0,.22)]"><h3 class="font-bold text-white">Source</h3><div class="mt-4 overflow-hidden rounded-2xl border border-white/10 bg-black/20">${configDetailRow('Path', item.path || 'pincore/Flow')}${configDetailRow('Created', item.created_at || '-')}${configDetailRow('Updated', item.updated_at || '-')}</div><p class="mt-4 text-sm text-slate-500">Flow is shown as an inspection view. Editing middleware should stay in source files so behavior remains explicit and reviewable.</p></div>
+        <div class="rounded-3xl border border-white/10 bg-[#091320]/90 p-4 shadow-[0_18px_70px_rgba(0,0,0,.22)]"><div class="mb-4 flex items-start justify-between"><h3 class="font-bold text-white">Flow Details</h3><button onclick="renderFlowDetails(null)" class="rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-sm font-bold text-slate-300 hover:bg-white/10">Close</button></div><div class="flex items-center gap-3"><span class="grid h-14 w-14 place-items-center rounded-2xl ${flowTypeTone(item.type)}">${icon(item.type === 'auth' || item.type === 'security' ? 'shield' : 'activity', 'h-6 w-6')}</span><div><div class="font-black text-white">${esc(item.name)} ${flowStatusBadge(item.status)}</div><div class="mt-1 text-sm text-slate-500">${esc(item.class)}</div></div></div><div class="mt-5 overflow-hidden rounded-2xl border border-white/10 bg-black/20">${configDetailRow('Type', item.type)}${configDetailRow('Group', item.group)}${configDetailRow('Priority', item.priority)}${configDetailRow('Applied To', item.global ? 'Global' : item.applied_routes + ' routes')}${configDetailRow('Global', item.global ? 'Yes' : 'No')}${configDetailRow('Updated', item.updated_at)}</div><p class="mt-4 text-sm leading-relaxed text-slate-300">${esc(item.description)}</p></div>
+        <div class="rounded-3xl border border-white/10 bg-[#091320]/90 p-4 shadow-[0_18px_70px_rgba(0,0,0,.22)]"><h3 class="font-bold text-white">Runs On Routes</h3><div class="mt-4 max-h-80 space-y-2 overflow-auto">${routes.length ? routes.map(route => `<div class="rounded-xl border border-white/10 bg-black/20 px-3 py-2"><div class="font-bold text-slate-100">${esc(route.method)} ${esc(route.uri || '/')}</div><div class="mt-1 truncate text-xs text-slate-500">${esc(route.name || route.action || route.file || '')}${route.line ? ' | Line ' + esc(route.line) : ''}</div></div>`).join('') : '<div class="text-sm text-slate-500">No route was matched for this flow group.</div>'}</div></div>
+        <div class="rounded-3xl border border-white/10 bg-[#091320]/90 p-4 shadow-[0_18px_70px_rgba(0,0,0,.22)]"><h3 class="font-bold text-white">Source</h3><div class="mt-4 overflow-hidden rounded-2xl border border-white/10 bg-black/20">${configDetailRow('Path', item.path || 'Flow/')}${configDetailRow('Created', item.created_at || '-')}${configDetailRow('Updated', item.updated_at || '-')}</div><p class="mt-4 text-sm text-slate-500">Flow is shown as an inspection view. Editing flow classes should stay in source files so behavior remains explicit and reviewable.</p></div>
       `;
     }
 
     function runFlowAction(action) {
-      showOperation('blue', 'Flow is read-only', 'Inspector shows real flow classes and middleware structure. Edit source files directly to change runtime behavior.');
+      showOperation('blue', 'Flow is read-only', 'Inspector shows real flow classes and structure. Edit source files directly to change runtime behavior.');
     }
 
     async function loadSchedule() {
@@ -3261,6 +3377,8 @@
     $('themeSearch').oninput = (event) => { state.themeSearch = event.target.value || ''; state.selectedTheme = 0; renderThemes(); };
     $('viewSearch').oninput = (event) => { state.viewSearch = event.target.value || ''; state.selectedView = 0; renderViews(); };
     $('langSearch').oninput = (event) => { state.langSearch = event.target.value || ''; state.selectedLang = 0; state.langEditing = false; renderLang(); };
+    $('langLocaleFilter')?.addEventListener('change', (event) => setLangLocale(event.target.value || 'all'));
+    $('langSyncReference')?.addEventListener('change', (event) => { state.langSyncReference = event.target.value || 'en'; });
     $('configSearch').oninput = (event) => { state.configSearch = event.target.value || ''; state.selectedConfig = 0; renderConfig(); };
     setReady(false);
     loadApps().then(() => boot()).then(() => {

@@ -5,6 +5,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/platform-context.php';
 require_once __DIR__ . '/manifest-context.php';
 require_once __DIR__ . '/route-context.php';
+require_once __DIR__ . '/lang-context.php';
 
 $platformRoot = normalize_path((string) ($_SERVER['PINX_INSPECTOR_PROJECT_ROOT'] ?? getenv('PINX_INSPECTOR_PROJECT_ROOT') ?: getcwd()));
 $root = inspector_scope_root($platformRoot);
@@ -199,6 +200,39 @@ try {
 
         $payload = json_decode((string) file_get_contents('php://input'), true);
         json_response(save_lang_payload($root, is_array($payload) ? $payload : []));
+        return;
+    }
+
+    if ($path === '/api/lang/copy-locale') {
+        if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
+            json_response(['error' => true, 'message' => 'POST is required.'], 405);
+            return;
+        }
+
+        $payload = json_decode((string) file_get_contents('php://input'), true);
+        json_response(copy_lang_locale_payload($root, is_array($payload) ? $payload : []));
+        return;
+    }
+
+    if ($path === '/api/lang/sync') {
+        if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
+            json_response(['error' => true, 'message' => 'POST is required.'], 405);
+            return;
+        }
+
+        $payload = json_decode((string) file_get_contents('php://input'), true);
+        json_response(sync_lang_file_payload($root, is_array($payload) ? $payload : []));
+        return;
+    }
+
+    if ($path === '/api/lang/sync-locale') {
+        if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
+            json_response(['error' => true, 'message' => 'POST is required.'], 405);
+            return;
+        }
+
+        $payload = json_decode((string) file_get_contents('php://input'), true);
+        json_response(sync_lang_locale_payload($root, is_array($payload) ? $payload : []));
         return;
     }
 
@@ -3482,7 +3516,7 @@ function flow_middleware_payload(string $root, array $routes): array
 
 function flow_middleware_files(string $root): array
 {
-    $bases = [$root . '/Middleware', $root . '/middleware', $root . '/Http/Middleware', $root . '/app/Http/Middleware'];
+    $bases = [$root . '/Flow', $root . '/flow', $root . '/Middleware', $root . '/middleware', $root . '/Http/Middleware', $root . '/app/Http/Middleware'];
     $pincore = resolve_pincore_path($root);
     if ($pincore !== null) {
         $bases[] = $pincore . '/Flow';
@@ -4009,6 +4043,7 @@ function lang_payload(string $root): array
     return [
         'files' => $files,
         'locales' => $locales,
+        'locale_stats' => lang_locale_stats($files),
         'categories' => [
             'all' => count($files),
             'app' => count(array_filter($files, static fn (array $file): bool => ($file['scope'] ?? '') === 'app')),
