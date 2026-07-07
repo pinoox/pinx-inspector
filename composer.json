@@ -1,6 +1,6 @@
 {
   "name": "pinoox/pinx-inspector",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Development-only Pinx Inspector dashboard for Pinoox projects (single-app and multi-app platform)",
   "type": "library",
   "license": "MIT",

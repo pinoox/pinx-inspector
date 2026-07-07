@@ -476,7 +476,8 @@ function summary_payload(string $root, ?string $platformRoot = null): array
             'developer' => (string) ($config['developer'] ?? $config['author'] ?? ''),
             'version_name' => (string) ($config['version-name'] ?? '1.0.0'),
             'version_code' => (int) ($config['version-code'] ?? 1),
-            'icon' => app_icon_payload($root, $config),
+            'icon' => ($iconRelative = app_icon_payload($root, $config)),
+            'icon_url' => inspector_public_asset_url($root, $iconRelative, $platformRoot),
             'lang' => (string) ($config['lang'] ?? 'en'),
             'lang_fallback' => (string) ($config['lang_fallback'] ?? $config['fallback-lang'] ?? 'en'),
             'theme' => (string) ($config['theme'] ?? 'default'),
@@ -512,7 +513,7 @@ function summary_payload(string $root, ?string $platformRoot = null): array
 function app_icon_payload(string $root, array $config): ?string
 {
     $icon = trim((string) ($config['icon'] ?? 'resource/icon.png'), '/');
-    if ($icon !== '' && is_file($root . '/' . $icon)) {
+    if ($icon !== '' && !str_starts_with($icon, '@') && is_file($root . '/' . $icon)) {
         return $icon;
     }
 
@@ -523,6 +524,23 @@ function app_icon_payload(string $root, array $config): ?string
     }
 
     return null;
+}
+
+function inspector_public_asset_url(string $scopeRoot, ?string $relativePath, ?string $platformRoot = null): ?string
+{
+    if ($relativePath === null || $relativePath === '') {
+        return null;
+    }
+
+    $relativePath = ltrim(str_replace('\\', '/', $relativePath), '/');
+    $platformRoot = normalize_path($platformRoot ?? inspector_platform_root_from_scope($scopeRoot));
+    $scopeRoot = normalize_path($scopeRoot);
+
+    if (inspector_is_platform($platformRoot) && basename(dirname($scopeRoot)) === 'apps') {
+        return '/apps/' . basename($scopeRoot) . '/' . $relativePath;
+    }
+
+    return '/' . $relativePath;
 }
 
 function transport_summary_payload(array $transport): array
@@ -2967,7 +2985,8 @@ function themes_payload(string $root): array
                 'size' => array_sum(array_map(static fn (string $file): int => filesize($file) ?: 0, $files)),
                 'size_label' => format_bytes(array_sum(array_map(static fn (string $file): int => filesize($file) ?: 0, $files))),
                 'colors' => theme_colors($dir),
-                'preview' => theme_preview_payload($root, $dir),
+                'preview' => ($previewRelative = theme_preview_payload($root, $dir)),
+                'preview_url' => inspector_public_asset_url($root, $previewRelative),
             ];
         }
     }
@@ -3681,8 +3700,13 @@ function theme_preview_payload(string $root, string $dir): ?string
             return ltrim(str_replace(normalize_path($root), '', normalize_path($file)), '/');
         }
     }
-    $icon = $root . '/resource/icon.png';
-    return is_file($icon) ? 'resource/icon.png' : null;
+    foreach (['resource/icon.png', 'icon.png'] as $candidate) {
+        if (is_file($root . '/' . $candidate)) {
+            return $candidate;
+        }
+    }
+
+    return null;
 }
 
 function views_payload(string $root): array
