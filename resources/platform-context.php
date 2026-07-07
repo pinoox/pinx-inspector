@@ -64,10 +64,11 @@ function inspector_list_apps(string $platformRoot): array
         }
 
         $mount = inspector_app_mount($package, $router);
+        $displayName = inspector_app_display_name($dir, $config, null, null, $platformRoot);
         $items[] = [
             'package' => $package,
-            'name' => (string) ($config['name'] ?? $config['title'] ?? $package),
-            'title' => (string) ($config['title'] ?? $config['name'] ?? $package),
+            'name' => $displayName,
+            'title' => inspector_app_title($dir, $config, null, null, $platformRoot),
             'theme' => (string) ($config['theme'] ?? 'default'),
             'enabled' => (bool) ($config['enable'] ?? true),
             'version_name' => (string) ($config['version-name'] ?? '1.0.0'),

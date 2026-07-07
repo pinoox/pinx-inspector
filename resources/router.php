@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/platform-context.php';
+require_once __DIR__ . '/manifest-context.php';
 
 $platformRoot = normalize_path((string) ($_SERVER['PINX_INSPECTOR_PROJECT_ROOT'] ?? getenv('PINX_INSPECTOR_PROJECT_ROOT') ?: getcwd()));
 $root = inspector_scope_root($platformRoot);
@@ -467,12 +468,14 @@ function summary_payload(string $root, ?string $platformRoot = null): array
     $connection = connection_config($root)['connection'];
     $engine = engine($root);
     $migrations = json_file(devdb_path($root) . '/meta/migrations.json', []);
+    $displayName = inspector_app_display_name($root, $config, null, null, $platformRoot);
 
     return [
         'app' => [
             'package' => (string) ($config['package'] ?? 'unknown'),
-            'name' => (string) ($config['name'] ?? $config['title'] ?? 'Pinoox App'),
-            'description' => (string) ($config['description'] ?? ''),
+            'name' => $displayName,
+            'title' => inspector_app_title($root, $config, null, null, $platformRoot),
+            'description' => inspector_app_description($root, $config, null, null, $platformRoot),
             'developer' => (string) ($config['developer'] ?? $config['author'] ?? ''),
             'version_name' => (string) ($config['version-name'] ?? '1.0.0'),
             'version_code' => (int) ($config['version-code'] ?? 1),
@@ -2958,6 +2961,8 @@ function themes_payload(string $root): array
 {
     $app = app_config($root);
     $active = (string) ($app['theme'] ?? 'default');
+    $locale = inspector_manifest_app_locale($app);
+    $fallbackLocale = inspector_manifest_fallback_locale($app);
     $themes = [];
     $base = $root . '/theme';
 
@@ -2966,10 +2971,26 @@ function themes_payload(string $root): array
             $name = basename($dir);
             $files = theme_files($dir);
             $config = theme_config_payload($dir);
+            $themeLangPaths = inspector_manifest_lang_paths_for_theme($root, $dir);
+            $themeSlug = title_from_slug($name);
             $themes[] = [
                 'name' => $name,
-                'title' => (string) ($config['name'] ?? title_from_slug($name)),
-                'description' => (string) ($config['description'] ?? 'Application theme package.'),
+                'title' => inspector_manifest_resolve_label(
+                    $config['title'] ?? $config['name'] ?? $themeSlug,
+                    $themeLangPaths,
+                    $locale,
+                    $fallbackLocale,
+                    $themeSlug,
+                    inspector_platform_root_from_scope($root),
+                ),
+                'description' => inspector_manifest_resolve_label(
+                    $config['description'] ?? 'Application theme package.',
+                    $themeLangPaths,
+                    $locale,
+                    $fallbackLocale,
+                    'Application theme package.',
+                    inspector_platform_root_from_scope($root),
+                ),
                 'type' => (string) ($config['type'] ?? ($name === 'default' ? 'core' : 'custom')),
                 'version' => (string) ($config['version'] ?? $config['version-name'] ?? '1.0.0'),
                 'author' => (string) ($config['author'] ?? $config['developer'] ?? ($name === 'default' ? 'Pinoox Team' : 'You')),
@@ -3042,7 +3063,7 @@ function pinker_payload(string $root): array
     return [
         'package' => [
             'name' => $package,
-            'title' => (string) ($app['name'] ?? title_from_slug($package)),
+            'title' => inspector_app_title($root, $app, null, null, $platformRoot),
             'version' => (string) ($app['version-name'] ?? $composer['version'] ?? '1.0.0'),
             'type' => (string) ($app['pinx']['type'] ?? 'single app'),
             'author' => (string) ($app['developer'] ?? $composer['authors'][0]['name'] ?? 'Pinoox Team'),
@@ -3051,7 +3072,7 @@ function pinker_payload(string $root): array
             'status' => is_file($root . '/app.php') ? 'ready' : 'needs manifest',
             'compatible' => 'Pinx >= ' . (string) ($app['pinx']['minpin'] ?? '2.0'),
             'license' => (string) ($app['license'] ?? $composer['license'] ?? 'MIT'),
-            'description' => (string) ($app['description'] ?? $composer['description'] ?? 'Pinoox application package.'),
+            'description' => inspector_app_description($root, $app, null, null, $platformRoot) ?: (string) ($composer['description'] ?? 'Pinoox application package.'),
             'icon' => (string) ($app['icon'] ?? 'resource/icon.png'),
         ],
         'overview' => [
