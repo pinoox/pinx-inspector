@@ -800,15 +800,43 @@ function tables_from_migration_file(string $file): array
         return [];
     }
 
+    return migration_table_refs_from_content($content);
+}
+
+function migration_table_refs_from_content(string $content): array
+{
     $content = replace_table_constants($content);
     $tables = [];
-    if (preg_match_all('/->(?:create|table|dropIfExists)\s*\(\s*(?:\$this->table\()?\s*[\'"]([A-Za-z0-9_]+)[\'"]/i', $content, $matches) !== false) {
+
+    if (preg_match_all('/->(?:create|table|dropIfExists)\s*\(\s*\$this->table\s*\(\s*[\'"]([^\'"]+)[\'"]\s*,\s*[\'"]([^\'"]+)[\'"]\s*\)/i', $content, $matches, PREG_SET_ORDER) !== false) {
+        foreach ($matches as $match) {
+            $tables[] = migration_preview_table_name((string) ($match[1] ?? ''), (string) ($match[2] ?? 'app'));
+        }
+    }
+
+    if (preg_match_all('/->(?:create|table|dropIfExists)\s*\(\s*[\'"]([A-Za-z0-9_]+)[\'"]/i', $content, $matches) !== false) {
         foreach ($matches[1] as $table) {
             $tables[] = (string) $table;
         }
     }
 
-    return array_values(array_unique($tables));
+    return array_values(array_unique(array_filter($tables, static fn (string $table): bool => $table !== '')));
+}
+
+function migration_preview_table_name(string $table, string $package): string
+{
+    $table = trim($table);
+    $package = trim($package);
+
+    if ($table === '') {
+        return '';
+    }
+
+    if ($package === '' || $package === '~') {
+        return $table;
+    }
+
+    return $package . '_' . $table;
 }
 
 function replace_table_constants(string $content): string
@@ -2382,10 +2410,23 @@ function migration_sql_preview(string $content, string $method): string
         return '-- SQL preview is not available for this migration.';
     }
 
+    $section = replace_table_constants($section);
     $lines = [];
+
+    if (preg_match_all('/->create\s*\(\s*\$this->table\s*\(\s*[\'"]([^\'"]+)[\'"]\s*,\s*[\'"]([^\'"]+)[\'"]\s*\)/i', $section, $matches, PREG_SET_ORDER) !== false) {
+        foreach ($matches as $match) {
+            $lines[] = 'CREATE TABLE `' . migration_preview_table_name((string) $match[1], (string) $match[2]) . '` (...);';
+        }
+    }
     if (preg_match_all('/Schema::create\s*\(\s*[\'"]([^\'"]+)[\'"]/i', $section, $matches)) {
         foreach ($matches[1] as $table) {
             $lines[] = 'CREATE TABLE `' . $table . '` (...);';
+        }
+    }
+
+    if (preg_match_all('/->table\s*\(\s*\$this->table\s*\(\s*[\'"]([^\'"]+)[\'"]\s*,\s*[\'"]([^\'"]+)[\'"]\s*\)/i', $section, $matches, PREG_SET_ORDER) !== false) {
+        foreach ($matches as $match) {
+            $lines[] = 'ALTER TABLE `' . migration_preview_table_name((string) $match[1], (string) $match[2]) . '` ...;';
         }
     }
     if (preg_match_all('/Schema::table\s*\(\s*[\'"]([^\'"]+)[\'"]/i', $section, $matches)) {
@@ -2393,27 +2434,52 @@ function migration_sql_preview(string $content, string $method): string
             $lines[] = 'ALTER TABLE `' . $table . '` ...;';
         }
     }
+
+    if (preg_match_all('/dropIfExists\s*\(\s*\$this->table\s*\(\s*[\'"]([^\'"]+)[\'"]\s*,\s*[\'"]([^\'"]+)[\'"]\s*\)/i', $section, $matches, PREG_SET_ORDER) !== false) {
+        foreach ($matches as $match) {
+            $lines[] = 'DROP TABLE IF EXISTS `' . migration_preview_table_name((string) $match[1], (string) $match[2]) . '`;';
+        }
+    }
     if (preg_match_all('/dropIfExists\s*\(\s*[\'"]([^\'"]+)[\'"]/i', $section, $matches)) {
         foreach ($matches[1] as $table) {
             $lines[] = 'DROP TABLE IF EXISTS `' . $table . '`;';
         }
     }
-    if (preg_match_all('/->(?:string|integer|bigInteger|text|boolean|timestamp|dateTime|decimal|float|uuid|json)\s*\(\s*[\'"]([^\'"]+)[\'"]/i', $section, $matches)) {
-        foreach (array_slice(array_unique($matches[1]), 0, 8) as $column) {
+
+    if ($lines === [] && preg_match_all('/\$table->(?:string|integer|bigInteger|unsignedInteger|increments|text|boolean|timestamp|dateTime|decimal|float|uuid|json|unsignedBigInteger)\s*\(\s*[\'"]([^\'"]+)[\'"]/i', $section, $matches)) {
+        foreach (array_slice(array_unique($matches[1]), 0, 12) as $column) {
             $lines[] = '  COLUMN `' . $column . '` ...';
         }
     }
 
-    return $lines === [] ? '-- Migration uses custom schema operations. Open source preview for details.' : implode("\n", array_slice($lines, 0, 16));
+    return $lines === [] ? '-- Migration uses custom schema operations. Open source preview for details.' : implode("\n", array_slice($lines, 0, 20));
 }
 
 function migration_method_body(string $content, string $method): string
 {
-    if (preg_match('/function\s+' . preg_quote($method, '/') . '\s*\([^)]*\)\s*(?::\s*[^{]+)?\{([\s\S]*?)(?:\n\s{4}\}|\n\})/i', $content, $match) !== 1) {
+    if (preg_match('/function\s+' . preg_quote($method, '/') . '\s*\([^)]*\)\s*(?::\s*[^{]+)?\{/i', $content, $match, PREG_OFFSET_CAPTURE) !== 1) {
         return '';
     }
 
-    return (string) $match[1];
+    $start = (int) $match[0][1] + strlen((string) $match[0][0]);
+    $length = strlen($content);
+    $depth = 1;
+    $pos = $start;
+
+    while ($pos < $length && $depth > 0) {
+        $char = $content[$pos];
+        if ($char === '{') {
+            $depth++;
+        } elseif ($char === '}') {
+            $depth--;
+            if ($depth === 0) {
+                return substr($content, $start, $pos - $start);
+            }
+        }
+        $pos++;
+    }
+
+    return '';
 }
 
 function migration_records_payload(string $root): array

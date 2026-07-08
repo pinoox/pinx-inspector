@@ -145,10 +145,18 @@
       }
     }
 
+    function syncDetailDrawerFrom(panelId) {
+      const drawer = $('detailDrawer');
+      const panel = $(panelId);
+      if (!drawer || !panel || drawer.classList.contains('hidden')) return;
+      $('detailDrawerBody').innerHTML = panel.innerHTML;
+    }
+
     function openDetailDrawerFrom(panelId, title, eyebrow = 'Inspector Details') {
       const panel = $(panelId);
       const drawer = $('detailDrawer');
       if (!panel || !drawer) return;
+      openDetailDrawerFrom.panelId = panelId;
       $('detailDrawerEyebrow').textContent = eyebrow;
       $('detailDrawerTitle').textContent = title || 'Details';
       $('detailDrawerBody').innerHTML = panel.innerHTML;
@@ -164,6 +172,7 @@
       if (!drawer) return;
       drawer.classList.add('hidden');
       $('detailDrawerBody').innerHTML = '';
+      openDetailDrawerFrom.panelId = '';
       document.body.classList.remove('overflow-hidden');
     }
 
@@ -1570,6 +1579,7 @@
           </div>
         </div>
       `;
+      syncDetailDrawerFrom('migrationDetails');
     }
 
     function renderMigrationDetailTab(item) {
@@ -1586,7 +1596,9 @@
         </div>`;
       }
       if (state.migrationDetailTab === 'structure') {
-        return `<div><h3 class="font-bold text-white">Detected Tables</h3><div class="mt-4 flex flex-wrap gap-2">${(item.tables || []).length ? item.tables.map(table => `<span class="rounded-xl border border-sky-300/20 bg-sky-400/10 px-3 py-2 text-sm font-bold text-sky-200">${esc(table)}</span>`).join('') : '<span class="text-sm text-slate-500">No table names detected.</span>'}</div><pre class="mt-4 max-h-64 overflow-auto rounded-2xl bg-[#06101c] p-4 text-xs leading-relaxed text-slate-300">${esc(item.content || 'Migration source is not available.')}</pre></div>`;
+        const upChanges = String(item.up_sql || '').trim();
+        const downChanges = String(item.down_sql || '').trim();
+        return `<div><h3 class="font-bold text-white">Detected Tables</h3><div class="mt-4 flex flex-wrap gap-2">${(item.tables || []).length ? item.tables.map(table => `<span class="rounded-xl border border-sky-300/20 bg-sky-400/10 px-3 py-2 text-sm font-bold text-sky-200">${esc(table)}</span>`).join('') : '<span class="text-sm text-slate-500">No table names detected.</span>'}</div><div class="mt-4 grid gap-3"><div><div class="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">Up changes</div><pre class="max-h-40 overflow-auto rounded-2xl bg-[#06101c] p-4 text-xs leading-relaxed text-violet-200">${esc(upChanges || '-- No up changes detected.')}</pre></div><div><div class="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">Down changes</div><pre class="max-h-40 overflow-auto rounded-2xl bg-[#06101c] p-4 text-xs leading-relaxed text-violet-200">${esc(downChanges || '-- No down changes detected.')}</pre></div></div><pre class="mt-4 max-h-64 overflow-auto rounded-2xl bg-[#06101c] p-4 text-xs leading-relaxed text-slate-300">${esc(item.content || 'Migration source is not available.')}</pre></div>`;
       }
       return `<div class="mb-4"><div class="mb-2 flex items-center justify-between"><span class="font-bold text-white">Up SQL</span><button data-copy="${esc(item.up_sql || '')}" onclick="copyText(this.dataset.copy)" class="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-xs text-slate-300">Copy</button></div><pre class="max-h-48 overflow-auto rounded-2xl bg-[#06101c] p-4 text-xs leading-relaxed text-violet-200">${esc(item.up_sql || '-- No preview available.')}</pre></div>
       <div><div class="mb-2 flex items-center justify-between"><span class="font-bold text-white">Down SQL</span><button data-copy="${esc(item.down_sql || '')}" onclick="copyText(this.dataset.copy)" class="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-xs text-slate-300">Copy</button></div><pre class="max-h-48 overflow-auto rounded-2xl bg-[#06101c] p-4 text-xs leading-relaxed text-violet-200">${esc(item.down_sql || '-- No preview available.')}</pre></div>`;
