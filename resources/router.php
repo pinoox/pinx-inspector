@@ -3852,7 +3852,7 @@ function view_files_payload(string $root): array
         if (!is_dir($base)) {
             continue;
         }
-        $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($base, FilesystemIterator::SKIP_DOTS));
+        $iterator = inspector_recursive_file_iterator($base);
         foreach ($iterator as $item) {
             if (!$item instanceof SplFileInfo || !$item->isFile()) {
                 continue;
@@ -4376,7 +4376,25 @@ function save_config_payload(string $root, array $payload): array
 function config_path_ignored(string $root, string $file): bool
 {
     $relative = '/' . ltrim(str_replace(normalize_path($root), '', normalize_path($file)), '/');
-    return str_contains($relative, '/vendor/') || str_contains($relative, '/storage/') || str_contains($relative, '/pinker/cache/');
+    return str_contains($relative, '/vendor/')
+        || str_contains($relative, '/node_modules/')
+        || str_contains($relative, '/storage/')
+        || str_contains($relative, '/pinker/cache/');
+}
+
+function inspector_scan_ignored_dir(string $name): bool
+{
+    return in_array(strtolower($name), ['node_modules', 'vendor', '.git', 'dist'], true);
+}
+
+function inspector_recursive_file_iterator(string $base): RecursiveIteratorIterator
+{
+    $directory = new RecursiveDirectoryIterator($base, FilesystemIterator::SKIP_DOTS);
+    $filtered = new RecursiveCallbackFilterIterator($directory, static function (SplFileInfo $current): bool {
+        return !($current->isDir() && inspector_scan_ignored_dir($current->getFilename()));
+    });
+
+    return new RecursiveIteratorIterator($filtered);
 }
 
 function config_category(string $relative): string

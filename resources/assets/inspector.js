@@ -254,8 +254,10 @@
       const payload = await api('/api/apps');
       state.platform = !!payload.platform;
       state.apps = Array.isArray(payload.items) ? payload.items : [];
+      const urlPackage = new URL(location.href).searchParams.get('package') || '';
       const stored = localStorage.getItem(packageStorageKey) || '';
-      state.activePackage = stored || payload.active || payload.default || (state.apps[0] && state.apps[0].package) || '';
+      state.activePackage = urlPackage || stored || payload.active || payload.default || (state.apps[0] && state.apps[0].package) || '';
+      if (state.activePackage) localStorage.setItem(packageStorageKey, state.activePackage);
       const wrap = $('appSelectorWrap');
       const select = $('appSelector');
       if (!state.platform || !select || state.apps.length === 0) {
@@ -265,12 +267,13 @@
       wrap.hidden = false;
       select.innerHTML = state.apps.map(app => `<option value="${esc(app.package)}">${esc(app.name || app.package)}</option>`).join('');
       if (state.activePackage) select.value = state.activePackage;
-      select.onchange = async () => {
-        state.activePackage = select.value || '';
-        localStorage.setItem(packageStorageKey, state.activePackage);
-        state.loaded = {};
-        await boot();
-        await refreshCurrentView();
+      select.onchange = () => {
+        const next = select.value || '';
+        if (!next || next === state.activePackage) return;
+        localStorage.setItem(packageStorageKey, next);
+        const url = new URL(location.href);
+        url.searchParams.set('package', next);
+        location.href = url.pathname + url.search + url.hash;
       };
     }
 
