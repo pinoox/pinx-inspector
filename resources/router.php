@@ -6,7 +6,6 @@ require_once __DIR__ . '/platform-context.php';
 require_once __DIR__ . '/manifest-context.php';
 require_once __DIR__ . '/route-context.php';
 require_once __DIR__ . '/lang-context.php';
-require_once __DIR__ . '/health-context.php';
 
 $platformRoot = normalize_path((string) ($_SERVER['PINX_INSPECTOR_PROJECT_ROOT'] ?? getenv('PINX_INSPECTOR_PROJECT_ROOT') ?: getcwd()));
 $root = inspector_scope_root($platformRoot);
@@ -1971,7 +1970,7 @@ function quote_identifier(string $name): string
 function cli_actions(): array
 {
     return [
-        ['id' => 'doctor', 'label' => 'Doctor', 'description' => 'Run scoped app and platform health checks', 'command' => 'inspector:doctor'],
+        ['id' => 'doctor', 'label' => 'Doctor', 'description' => 'Run scoped app and platform health checks', 'command' => 'doctor --json'],
         ['id' => 'migrate_status', 'label' => 'Migrations', 'description' => 'Show migration status', 'command' => 'migrate:status'],
         ['id' => 'routes', 'label' => 'Routes', 'description' => 'List route actions', 'command' => 'route:actions'],
         ['id' => 'devdb_status', 'label' => 'DevDB Status', 'description' => 'Inspect DevDB runtime status', 'command' => 'devdb:status --json'],
@@ -1991,14 +1990,11 @@ function cli_actions(): array
 
 function run_cli_action(string $root, string $action): array
 {
-    if ($action === 'doctor') {
-        return inspector_doctor_result($root);
-    }
-
     $platformRoot = inspector_platform_root_from_scope($root);
     $package = inspector_is_platform($platformRoot) ? inspector_active_package($platformRoot) : null;
 
     $commands = [
+        'doctor' => ['doctor', '--json', '--no-ansi'],
         'migrate_status' => ['migrate:status', '--no-ansi'],
         'routes' => ['route:actions', '--no-ansi'],
         'devdb_status' => ['devdb:status', '--json', '--no-ansi'],
@@ -2087,7 +2083,7 @@ function command_payload(string $root, string $action): array
 
 function health_payload(string $root): array
 {
-    $result = inspector_doctor_result($root);
+    $result = run_cli_action($root, 'doctor');
     $json = is_array($result['json']) ? $result['json'] : [];
     $summary = is_array($json['summary'] ?? null) ? $json['summary'] : [];
     $checks = is_array($json['checks'] ?? null) ? $json['checks'] : [];
@@ -3014,9 +3010,9 @@ function save_env_payload(string $root, array $payload): array
     return ['ok' => true, 'message' => '.env saved.', 'items' => env_payload($root)['items']];
 }
 
-function config_payload(string $root): array
+function config_payload(string $root, bool $withUsage = true): array
 {
-    $files = config_files_payload($root);
+    $files = config_files_payload($root, $withUsage);
     $env = read_env($root);
     $categories = ['all' => count($files), 'app' => 0, 'theme' => 0, 'platform' => 0];
 
@@ -3122,9 +3118,9 @@ function pinker_payload(string $root): array
     $cache = $appPinker . '/cache';
     $routesCache = $cache . '/routes.php';
     $viewsCache = $cache . '/views.php';
-    $configFiles = config_payload($root)['files'] ?? [];
-    $views = views_payload($root);
-    $routes = routes_payload($root);
+    $configFiles = config_files_payload($root, false);
+    $routesSummary = inspector_routes_summary($root);
+    $viewsCount = inspector_template_count($root);
     $pinkerFiles = is_dir($pinker) ? directory_files($pinker, []) : [];
     $lastBuild = last_modified_time($pinkerFiles);
     $dependencies = array_merge((array) ($composer['require'] ?? []), (array) ($composer['require-dev'] ?? []));
@@ -3139,8 +3135,8 @@ function pinker_payload(string $root): array
     $checks = [
         ['label' => 'Pinker Directory', 'value' => is_dir($pinker) ? 'Available' : 'Not built', 'ok' => is_dir($pinker)],
         ['label' => 'Manifest Metadata', 'value' => is_file($root . '/app.php') ? 'Readable' : 'Missing', 'ok' => is_file($root . '/app.php')],
-        ['label' => 'Routes Cache', 'value' => count($routes['routes'] ?? []) . ' routes', 'ok' => is_file($routesCache)],
-        ['label' => 'Views Cache', 'value' => count($views['items'] ?? []) . ' views', 'ok' => is_file($viewsCache) || count($views['items'] ?? []) > 0],
+        ['label' => 'Routes Cache', 'value' => $routesSummary['routes'] . ' routes', 'ok' => is_file($routesCache)],
+        ['label' => 'Views Cache', 'value' => $viewsCount . ' views', 'ok' => is_file($viewsCache) || $viewsCount > 0],
         ['label' => 'Config Metadata', 'value' => count($configFiles) . ' files', 'ok' => true],
         ['label' => 'Cache Files', 'value' => count($pinkerFiles) . ' files', 'ok' => count($pinkerFiles) > 0],
     ];
@@ -3161,9 +3157,9 @@ function pinker_payload(string $root): array
             'icon' => (string) ($app['icon'] ?? 'resource/icon.png'),
         ],
         'overview' => [
-            'routes_cache' => ['status' => is_file($routesCache) ? 'Built' : 'Pending', 'count' => count($routes['routes'] ?? []), 'note' => 'routes cached'],
-            'views_cache' => ['status' => is_file($viewsCache) || count($views['items'] ?? []) ? 'Built' : 'Pending', 'count' => count($views['items'] ?? []), 'note' => 'views scanned'],
-            'api_cache' => ['status' => is_file($pinker . '/platform/app-router.config.php') ? 'Built' : 'Pending', 'count' => count($routes['files'] ?? []), 'note' => 'route files'],
+            'routes_cache' => ['status' => is_file($routesCache) ? 'Built' : 'Pending', 'count' => $routesSummary['routes'], 'note' => 'routes cached'],
+            'views_cache' => ['status' => is_file($viewsCache) || $viewsCount > 0 ? 'Built' : 'Pending', 'count' => $viewsCount, 'note' => 'views scanned'],
+            'api_cache' => ['status' => is_file($pinker . '/platform/app-router.config.php') ? 'Built' : 'Pending', 'count' => count($routesSummary['files']), 'note' => 'route files'],
             'config_cache' => ['status' => 'Scanned', 'count' => count($configFiles), 'note' => 'config files'],
             'cache_files' => ['status' => count($pinkerFiles) > 0 ? 'Available' : 'Empty', 'count' => count($pinkerFiles), 'note' => 'pinker files'],
             'cache_size' => ['value' => format_bytes(array_sum(array_map(static fn (string $file): int => filesize($file) ?: 0, $pinkerFiles))), 'note' => 'pinker cache size'],
@@ -3867,14 +3863,73 @@ function views_payload(string $root): array
     ];
 }
 
-function view_files_payload(string $root): array
+function inspector_template_count(string $root): int
 {
-    $bases = [
+    $count = 0;
+    foreach (inspector_view_scan_bases($root) as $base) {
+        if (!is_dir($base)) {
+            continue;
+        }
+        foreach (inspector_recursive_file_iterator($base) as $item) {
+            if (!$item instanceof SplFileInfo || !$item->isFile()) {
+                continue;
+            }
+            $file = $item->getPathname();
+            if (config_path_ignored($root, $file)) {
+                continue;
+            }
+            if (in_array(view_extension($file), ['Blade', 'Twig', 'PHP'], true)) {
+                $count++;
+            }
+        }
+    }
+
+    return $count;
+}
+
+function inspector_view_scan_bases(string $root): array
+{
+    return [
         $root . '/resource/views',
         $root . '/resource/Views',
         $root . '/resource/theme',
         $root . '/theme',
     ];
+}
+
+function inspector_routes_summary(string $root): array
+{
+    $files = [];
+    $routeCount = 0;
+
+    foreach (discover_route_files($root) as $relative) {
+        $relative = trim(str_replace('\\', '/', (string) $relative), '/');
+        if ($relative === '') {
+            continue;
+        }
+
+        $path = resolve_project_path($root, $relative);
+        $exists = is_file($path);
+        $parsed = $exists ? parse_routes_from_file($root, $relative) : ['routes' => [], 'actions' => []];
+        $fileRoutes = count($parsed['routes'] ?? []);
+        $routeCount += $fileRoutes;
+        $files[] = [
+            'path' => $relative,
+            'exists' => $exists,
+            'routes' => $fileRoutes,
+            'channel' => route_channel_for_file($relative),
+        ];
+    }
+
+    return [
+        'files' => $files,
+        'routes' => $routeCount,
+    ];
+}
+
+function view_files_payload(string $root): array
+{
+    $bases = inspector_view_scan_bases($root);
     $files = [];
     foreach ($bases as $base) {
         if (!is_dir($base)) {
@@ -4258,7 +4313,7 @@ function save_lang_payload(string $root, array $payload): array
     ];
 }
 
-function config_files_payload(string $root): array
+function config_files_payload(string $root, bool $withUsage = true): array
 {
     $entries = [];
     $patterns = [
@@ -4332,7 +4387,7 @@ function config_files_payload(string $root): array
             'env_keys' => config_env_keys($content),
             'content' => substr($content, 0, 24000),
             'truncated' => strlen($content) > 24000,
-            'usage' => config_usage_payload($root, $relative),
+            'usage' => $withUsage ? config_usage_payload($root, $relative) : [],
         ];
     }
 
@@ -4473,7 +4528,7 @@ function config_usage_payload(string $root, string $relative): array
         if (!is_dir($base)) {
             continue;
         }
-        $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($base, FilesystemIterator::SKIP_DOTS));
+        $iterator = inspector_recursive_file_iterator($base);
         foreach ($iterator as $item) {
             if (!$item instanceof SplFileInfo || !$item->isFile() || strtolower($item->getExtension()) !== 'php') {
                 continue;
