@@ -2134,7 +2134,7 @@
     }
 
     function setViewType(type) { state.viewType = type || 'all'; state.selectedView = 0; state.viewEditing = false; renderViews(); }
-    function selectView(index) { state.selectedView = index; state.viewEditing = false; renderViews(); openDetailDrawerFrom('viewDetails', 'View Details', 'Views'); }
+    function selectView(index) { state.selectedView = index; state.viewEditing = false; renderViews(); }
 
     function renderViewEditor(view) {
       if (!view) {
@@ -2413,7 +2413,6 @@
       state.selectedLang = index;
       state.langEditing = false;
       renderLang();
-      openDetailDrawerFrom('langDetails', 'Language Details', 'Lang');
     }
 
     function currentLangFile() {
@@ -2653,7 +2652,6 @@
       state.selectedConfig = index;
       state.configEditing = false;
       renderConfig();
-      openDetailDrawerFrom('configDetails', 'Config Details', 'Config');
     }
 
     function renderConfigEditor(file) {
