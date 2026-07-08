@@ -2,10 +2,20 @@
     const $ = (id) => document.getElementById(id);
     const base = location.pathname.startsWith('/~inspector') ? '/~inspector' : '';
     const packageStorageKey = 'pinx.inspector.package';
+    const urlPackage = () => {
+      if (state.locked) return '';
+      return new URL(location.href).searchParams.get('package') || '';
+    };
+    const scopedPackage = () => {
+      if (state.locked || state.selectable === false) return '';
+      if (!state.platform && !urlPackage()) return '';
+      return state.activePackage || urlPackage() || '';
+    };
     const scopedUrl = (url) => {
-      if (state.locked || !state.platform || !state.activePackage || state.selectable === false) return url;
+      const pkg = scopedPackage();
+      if (!pkg) return url;
       const join = url.includes('?') ? '&' : '?';
-      return url + join + 'package=' + encodeURIComponent(state.activePackage);
+      return url + join + 'package=' + encodeURIComponent(pkg);
     };
     async function fetchJson(url, options = {}) {
       const response = await fetch(base + scopedUrl(url), { cache: 'no-store', ...options });
@@ -280,9 +290,11 @@
       state.locked = !!payload.locked;
       state.selectable = payload.selectable === true;
       state.apps = Array.isArray(payload.items) ? payload.items : [];
-      const urlPackage = state.locked ? '' : (new URL(location.href).searchParams.get('package') || '');
+      const fromUrl = urlPackage();
       const stored = state.locked ? '' : (localStorage.getItem(packageStorageKey) || '');
-      state.activePackage = payload.active || payload.default || urlPackage || stored || (state.apps[0] && state.apps[0].package) || '';
+      const known = new Set(state.apps.map(app => app.package));
+      const pick = (value) => value && known.has(value) ? value : '';
+      state.activePackage = pick(fromUrl) || pick(stored) || pick(payload.active) || pick(payload.default) || (state.apps[0] && state.apps[0].package) || '';
       if (state.activePackage && !state.locked) localStorage.setItem(packageStorageKey, state.activePackage);
       const wrap = $('appSelectorWrap');
       const select = $('appSelector');
@@ -300,16 +312,51 @@
       }
       if (wrap) wrap.hidden = false;
       select.disabled = false;
-      select.innerHTML = state.apps.map(app => `<option value="${esc(app.package)}">${esc(app.name || app.package)}</option>`).join('');
-      if (state.activePackage) select.value = state.activePackage;
       select.onchange = () => {
         const next = select.value || '';
         if (!next || next === state.activePackage) return;
-        localStorage.setItem(packageStorageKey, next);
-        const url = new URL(location.href);
-        url.searchParams.set('package', next);
-        location.href = url.pathname + url.search + url.hash;
+        runWithLoading('Switching app', 'Reloading Inspector for the selected app.', () => switchApp(next), 'App context updated.');
       };
+    }
+
+    function resetAppScopedState() {
+      state.loaded = {};
+      state.loading = {};
+      state.database = null;
+      state.tables = [];
+      state.selected = null;
+      state.selectedRowKeys = [];
+      state.routes = null;
+      state.migrations = null;
+      state.flow = null;
+      state.schedule = null;
+      state.logs = null;
+      state.themes = null;
+      state.pinker = null;
+      state.build = null;
+      state.views = null;
+      state.lang = null;
+      state.env = null;
+      state.config = null;
+      state.queryLastPayload = null;
+      state.queryRawResult = null;
+      state.queryRows = [];
+      state.queryColumns = [];
+    }
+
+    async function switchApp(next) {
+      if (!next || next === state.activePackage || state.locked || !state.selectable) return;
+      state.activePackage = next;
+      localStorage.setItem(packageStorageKey, next);
+      const url = new URL(location.href);
+      url.searchParams.set('package', next);
+      history.replaceState(null, '', url.pathname + url.search + url.hash);
+      const select = $('appSelector');
+      if (select) select.value = next;
+      resetAppScopedState();
+      await boot();
+      state.loaded[state.view] = false;
+      await loadViewData(state.view, true);
     }
 
     async function boot() {
@@ -320,7 +367,12 @@
         state.platform = !!summary.platform.enabled;
         state.locked = !!summary.platform.locked;
         state.selectable = summary.platform.selectable === true;
-        state.activePackage = summary.platform.package || summary.app.package || state.activePackage;
+        const fromUrl = urlPackage();
+        if (!state.locked && fromUrl && state.apps.some(app => app.package === fromUrl)) {
+          state.activePackage = fromUrl;
+        } else {
+          state.activePackage = summary.platform.package || summary.app.package || state.activePackage;
+        }
       }
       $('appName').textContent = summary.app.name;
       $('sideAppName').textContent = summary.app.name;
