@@ -3419,42 +3419,65 @@ function pinker_payload(string $root): array
     ];
 }
 
-function pinx_keys_dir(string $root): string
+function pinx_workspace_root(string $platformRoot): string
 {
-    return rtrim(normalize_path($root), '/') . '/pinx/keys';
+    return rtrim(normalize_path($platformRoot), '/') . '/pinx';
 }
 
-function pinx_export_dir(string $root): string
+function pinx_keys_dir(string $platformRoot, string $package): string
 {
-    return rtrim(normalize_path($root), '/') . '/pinx/export';
+    return pinx_workspace_root($platformRoot) . '/keys/' . $package;
 }
 
-function pinx_legacy_releases_dir(string $root): string
+function pinx_export_dir(string $platformRoot, string $package): string
 {
-    return rtrim(normalize_path($root), '/') . '/pinx/releases';
+    return pinx_workspace_root($platformRoot) . '/export/' . $package;
 }
 
-function pinx_releases_dir(string $root): string
+function pinx_legacy_app_export_dir(string $appRoot): string
 {
-    return pinx_export_dir($root);
+    return rtrim(normalize_path($appRoot), '/') . '/pinx/export';
 }
 
-function pinx_legacy_export_dir(string $root): string
+function pinx_legacy_releases_dir(string $appRoot): string
 {
-    return rtrim(normalize_path($root), '/') . '/export';
+    return rtrim(normalize_path($appRoot), '/') . '/pinx/releases';
 }
 
-function pinx_resolve_sign_key_path(string $root, string $relative = ''): string
+function pinx_releases_dir(string $platformRoot, string $package): string
+{
+    return pinx_export_dir($platformRoot, $package);
+}
+
+function pinx_legacy_export_dir(string $appRoot): string
+{
+    return rtrim(normalize_path($appRoot), '/') . '/export';
+}
+
+function pinx_resolve_sign_key_path(string $platformRoot, string $appRoot, string $package, string $relative = ''): string
 {
     $relative = trim(str_replace('\\', '/', $relative));
     $candidates = [];
 
     if ($relative !== '') {
-        $candidates[] = inspector_resolve_shared_path($root, $relative);
+        if (str_starts_with($relative, '~')) {
+            $resolved = str_replace('{package}', $package, $relative);
+            if (str_starts_with($resolved, '~/')) {
+                $resolved = rtrim(normalize_path($platformRoot), '/') . '/' . ltrim(substr($resolved, 2), '/');
+            } elseif (str_starts_with($resolved, '~pinx/')) {
+                $resolved = pinx_workspace_root($platformRoot) . '/' . ltrim(substr($resolved, 6), '/');
+            }
+            $candidates[] = normalize_path($resolved);
+        } else {
+            $candidates[] = inspector_resolve_shared_path($appRoot, $relative);
+            $candidates[] = inspector_resolve_shared_path($platformRoot, $relative);
+        }
     }
 
-    $candidates[] = pinx_keys_dir($root) . '/sign.key.json';
-    $candidates[] = rtrim(normalize_path($root), '/') . '/pinx/sign.key.json';
+    $candidates[] = pinx_keys_dir($platformRoot, $package) . '/sign.key.json';
+    $candidates[] = rtrim(normalize_path($appRoot), '/') . '/pinx/keys/sign.key.json';
+    $candidates[] = rtrim(normalize_path($appRoot), '/') . '/pinx/sign.key.json';
+    $candidates[] = pinx_workspace_root($platformRoot) . '/keys/' . $package . '.key.json';
 
     foreach ($candidates as $candidate) {
         if ($candidate !== '' && is_file($candidate)) {
@@ -3463,14 +3486,19 @@ function pinx_resolve_sign_key_path(string $root, string $relative = ''): string
     }
 
     return $relative !== ''
-        ? normalize_path(inspector_resolve_shared_path($root, $relative))
-        : normalize_path(pinx_keys_dir($root) . '/sign.key.json');
+        ? normalize_path($candidates[0] ?? pinx_keys_dir($platformRoot, $package) . '/sign.key.json')
+        : normalize_path(pinx_keys_dir($platformRoot, $package) . '/sign.key.json');
 }
 
-function pinx_collect_release_entries(string $root): array
+function pinx_collect_release_entries(string $platformRoot, string $appRoot, string $package): array
 {
     $exports = [];
-    $directories = [pinx_export_dir($root), pinx_legacy_releases_dir($root), pinx_legacy_export_dir($root)];
+    $directories = [
+        pinx_export_dir($platformRoot, $package),
+        pinx_legacy_app_export_dir($appRoot),
+        pinx_legacy_releases_dir($appRoot),
+        pinx_legacy_export_dir($appRoot),
+    ];
 
     foreach ($directories as $directory) {
         if (!is_dir($directory)) {
@@ -3503,16 +3531,17 @@ function build_payload(string $root): array
 {
     $app = app_config($root);
     $package = (string) ($app['package'] ?? basename($root));
+    $platformRoot = inspector_platform_root_from_scope($root);
     $versionName = (string) ($app['version-name'] ?? '1.0.0');
     $versionCode = (int) ($app['version-code'] ?? 1);
     $sign = is_array($app['pinx']['sign'] ?? null) ? $app['pinx']['sign'] : [];
     $keyPath = (string) ($sign['key'] ?? '');
     if ($keyPath === '') {
-        $keyPath = 'pinx/keys/sign.key.json';
+        $keyPath = '~pinx/keys/' . $package . '/sign.key.json';
     }
-    $resolvedKeyPath = pinx_resolve_sign_key_path($root, $keyPath);
-    $exportDir = pinx_export_dir($root);
-    $exports = pinx_collect_release_entries($root);
+    $resolvedKeyPath = pinx_resolve_sign_key_path($platformRoot, $root, $package, $keyPath);
+    $exportDir = pinx_export_dir($platformRoot, $package);
+    $exports = pinx_collect_release_entries($platformRoot, $root, $package);
     $vendorDir = inspector_vendor_dir($root);
     $pinker = pinker_payload($root);
     $checks = [
@@ -3551,8 +3580,9 @@ function build_payload(string $root): array
             'app' => normalize_path($root),
             'manifest' => normalize_path($root . '/app.php'),
             'releases' => normalize_path($exportDir),
-            'keys' => normalize_path(pinx_keys_dir($root)),
+            'keys' => normalize_path(pinx_keys_dir($platformRoot, $package)),
             'export' => normalize_path($exportDir),
+            'workspace' => normalize_path(pinx_workspace_root($platformRoot)),
             'vendor' => $vendorDir,
             'storage' => inspector_storage_dir($root),
         ],
@@ -3579,9 +3609,11 @@ function build_sign_payload(string $root, array $payload): array
 
     $app['pinx'] = is_array($app['pinx'] ?? null) ? $app['pinx'] : [];
     $sign = is_array($app['pinx']['sign'] ?? null) ? $app['pinx']['sign'] : [];
-    $keyDir = pinx_keys_dir($root);
+    $package = (string) ($app['package'] ?? basename($root));
+    $platformRoot = inspector_platform_root_from_scope($root);
+    $keyDir = pinx_keys_dir($platformRoot, $package);
     $keyFile = $keyDir . '/sign.key.json';
-    $relativeKey = 'pinx/keys/sign.key.json';
+    $relativeKey = '~pinx/keys/' . $package . '/sign.key.json';
 
     if ($action === 'generate') {
         if (!is_dir($keyDir)) {
@@ -3641,7 +3673,7 @@ function build_sign_payload(string $root, array $payload): array
     write_php_array_file($manifest, $app);
 
     $messages = [
-        'generate' => 'Signing key was generated in pinx/keys/ and signing was enabled.',
+        'generate' => 'Signing key was generated in ~pinx/keys/{package}/ and signing was enabled.',
         'enable' => 'Package signing was enabled.',
         'disable' => 'Package signing was disabled.',
         'require' => 'Package signing is now required for release builds.',
