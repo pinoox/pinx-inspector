@@ -192,8 +192,36 @@ function inspector_list_apps(string $platformRoot): array
     return $items;
 }
 
-function inspector_app_router_map(string $platformRoot): array
+function inspector_app_router_routes(string $platformRoot): array
 {
+    if (!inspector_prepare_pincore($platformRoot)) {
+        return inspector_app_router_routes_fallback($platformRoot);
+    }
+
+    if (class_exists(\Pinoox\Portal\App\AppRouter::class)) {
+        try {
+            return \Pinoox\Portal\App\AppRouter::routes();
+        } catch (Throwable) {
+        }
+    }
+
+    if (class_exists(\Pinoox\Support\SystemConfig::class)) {
+        try {
+            $routes = \Pinoox\Support\SystemConfig::get('app-router');
+
+            if (is_array($routes) && class_exists(\Pinoox\Component\Package\Routing\AppRouteMatcher::class)) {
+                return \Pinoox\Component\Package\Routing\AppRouteMatcher::normalizeRoutes($routes);
+            }
+        } catch (Throwable) {
+        }
+    }
+
+    return inspector_app_router_routes_fallback($platformRoot);
+}
+
+function inspector_app_router_routes_fallback(string $platformRoot): array
+{
+    $platformRoot = normalize_path($platformRoot);
     $candidates = [
         $platformRoot . '/platform/app-router.config.php',
         $platformRoot . '/pinker/platform/app-router.config.php',
@@ -211,33 +239,32 @@ function inspector_app_router_map(string $platformRoot): array
             continue;
         }
 
-        $map = [];
-
-        foreach ($routes as $path => $package) {
-            if (!is_string($path) || !is_string($package) || $package === '') {
-                continue;
-            }
-
-            $map[$package] = $path === '' ? '/' : $path;
+        if (class_exists(\Pinoox\Component\Package\Routing\AppRouteMatcher::class)) {
+            return \Pinoox\Component\Package\Routing\AppRouteMatcher::normalizeRoutes($routes);
         }
 
-        return $map;
+        return $routes;
     }
 
     return [];
 }
 
-function inspector_app_mount(string $package, array $router): string
+function inspector_app_router_map(string $platformRoot): array
 {
-    if (isset($router[$package])) {
-        $mount = (string) $router[$package];
+    return inspector_app_router_routes($platformRoot);
+}
 
-        return $mount === '' ? '/' : $mount;
+function inspector_app_mount(string $package, array $routes): string
+{
+    if ($routes !== [] && class_exists(\Pinoox\Component\Server\ServeAppBinding::class)) {
+        return \Pinoox\Component\Server\ServeAppBinding::preferPackageMountPath($package, $routes);
     }
 
-    foreach ($router as $path => $mappedPackage) {
+    foreach ($routes as $path => $mappedPackage) {
         if ($mappedPackage === $package) {
-            return $path === '' ? '/' : (string) $path;
+            $mount = (string) $path;
+
+            return $mount === '' ? '/' : $mount;
         }
     }
 
@@ -279,25 +306,42 @@ function inspector_parse_package_binding(string $value): ?string
     return null;
 }
 
-function inspector_bootstrap_pincore(string $platformRoot): bool
+function inspector_prepare_pincore(string $platformRoot): bool
 {
-    static $booted = [];
+    static $prepared = [];
 
     $platformRoot = normalize_path($platformRoot);
 
-    if (isset($booted[$platformRoot])) {
-        return $booted[$platformRoot];
+    if (isset($prepared[$platformRoot])) {
+        return $prepared[$platformRoot];
     }
 
     $autoload = $platformRoot . '/vendor/autoload.php';
 
     if (!is_file($autoload)) {
-        return $booted[$platformRoot] = false;
+        return $prepared[$platformRoot] = false;
     }
 
     require_once $autoload;
 
-    return $booted[$platformRoot] = true;
+    if (!defined('PINOOX_BASE_PATH')) {
+        define('PINOOX_BASE_PATH', $platformRoot);
+    }
+
+    if (class_exists(\Pinoox\Component\Kernel\Loader::class)) {
+        \Pinoox\Component\Kernel\Loader::init($platformRoot);
+    }
+
+    if (class_exists(\Pinoox\Component\Helpers\EnvBootstrap::class)) {
+        \Pinoox\Component\Helpers\EnvBootstrap::load($platformRoot);
+    }
+
+    return $prepared[$platformRoot] = true;
+}
+
+function inspector_bootstrap_pincore(string $platformRoot): bool
+{
+    return inspector_prepare_pincore($platformRoot);
 }
 
 function inspector_pincore_dev_package(string $platformRoot): ?string
@@ -676,7 +720,7 @@ function apps_payload(string $platformRoot): array
         ? inspector_locked_package($platformRoot)
         : ($isPlatform ? inspector_active_package($platformRoot) : inspector_app_package($scopeRoot, $platformRoot));
     $items = inspector_visible_apps($platformRoot);
-    $router = $isPlatform && !$locked ? inspector_app_router_map($platformRoot) : [];
+    $router = $isPlatform ? inspector_app_router_routes($platformRoot) : [];
 
     return [
         'platform' => $isPlatform,

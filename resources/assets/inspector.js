@@ -286,11 +286,20 @@
       if (state.activePackage && !state.locked) localStorage.setItem(packageStorageKey, state.activePackage);
       const wrap = $('appSelectorWrap');
       const select = $('appSelector');
-      if (!state.selectable || !select || state.apps.length <= 1) {
+      if (!select || state.apps.length === 0) {
         if (wrap) wrap.hidden = true;
         return;
       }
-      wrap.hidden = false;
+      select.innerHTML = state.apps.map(app => `<option value="${esc(app.package)}">${esc(app.name || app.package)}</option>`).join('');
+      if (state.activePackage) select.value = state.activePackage;
+      if (state.apps.length === 1 || !state.selectable) {
+        if (wrap) wrap.hidden = false;
+        select.disabled = true;
+        select.onchange = null;
+        return;
+      }
+      if (wrap) wrap.hidden = false;
+      select.disabled = false;
       select.innerHTML = state.apps.map(app => `<option value="${esc(app.package)}">${esc(app.name || app.package)}</option>`).join('');
       if (state.activePackage) select.value = state.activePackage;
       select.onchange = () => {
