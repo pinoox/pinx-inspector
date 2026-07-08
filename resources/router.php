@@ -714,7 +714,7 @@ function core_tables_payload(string $root, array $existingTables): array
         }
 
         foreach (glob(rtrim((string) $source['path'], '/') . '/*.php') ?: [] as $file) {
-            foreach (tables_from_migration_file((string) $file) as $table) {
+            foreach (tables_from_migration_file((string) $file, $root) as $table) {
                 $physical = physical_table_candidates($table);
                 $matched = first_matching_table($physical, $existingTables);
                 $key = $table . '|' . (string) $source['scope'];
@@ -793,50 +793,218 @@ function resolve_pincore_path(string $root): ?string
     return null;
 }
 
-function tables_from_migration_file(string $file): array
+function tables_from_migration_file(string $file, string $root): array
 {
     $content = file_get_contents($file);
     if (!is_string($content) || $content === '') {
         return [];
     }
 
-    return migration_table_refs_from_content($content);
+    return migration_table_refs_from_content($content, $root);
 }
 
-function migration_table_refs_from_content(string $content): array
+function migration_table_refs_from_content(string $content, string $root): array
 {
     $content = replace_table_constants($content);
     $tables = [];
 
     if (preg_match_all('/->(?:create|table|dropIfExists)\s*\(\s*\$this->table\s*\(\s*[\'"]([^\'"]+)[\'"]\s*,\s*[\'"]([^\'"]+)[\'"]\s*\)/i', $content, $matches, PREG_SET_ORDER) !== false) {
         foreach ($matches as $match) {
-            $tables[] = migration_preview_table_name((string) ($match[1] ?? ''), (string) ($match[2] ?? 'app'));
+            $tables[] = migration_physical_table_name($root, (string) ($match[1] ?? ''), (string) ($match[2] ?? 'app'));
         }
     }
 
     if (preg_match_all('/->(?:create|table|dropIfExists)\s*\(\s*[\'"]([A-Za-z0-9_]+)[\'"]/i', $content, $matches) !== false) {
         foreach ($matches[1] as $table) {
-            $tables[] = (string) $table;
+            $tables[] = migration_physical_table_name($root, (string) $table, 'app');
         }
     }
 
     return array_values(array_unique(array_filter($tables, static fn (string $table): bool => $table !== '')));
 }
 
-function migration_preview_table_name(string $table, string $package): string
+function migration_default_connection_prefix(): string
+{
+    return 'pinx_';
+}
+
+function migration_env_root(string $root): string
+{
+    return inspector_platform_root_from_scope($root);
+}
+
+function migration_connection_prefix(string $root): string
+{
+    $env = read_env(migration_env_root($root));
+
+    if (array_key_exists('DB_PREFIX', $env)) {
+        return (string) $env['DB_PREFIX'];
+    }
+
+    return migration_default_connection_prefix();
+}
+
+function migration_app_config_for_package(string $root, string $package): array
+{
+    $platformRoot = inspector_platform_root_from_scope($root);
+    $appRoot = normalize_path($platformRoot . '/apps/' . $package);
+    if (!is_file($appRoot . '/app.php')) {
+        return [];
+    }
+
+    return app_config($appRoot);
+}
+
+function migration_app_database_config(string $root, string $package): ?array
+{
+    $config = migration_app_config_for_package($root, $package);
+    $database = $config['database'] ?? null;
+
+    return is_array($database) ? $database : null;
+}
+
+function migration_app_table_config(string $root, string $package): ?array
+{
+    $config = migration_app_config_for_package($root, $package);
+    $table = $config['table'] ?? null;
+
+    return is_array($table) ? $table : null;
+}
+
+function migration_app_explicit_prefix(?array $database, ?array $table): ?string
+{
+    if (is_array($database) && isset($database['prefix']) && $database['prefix'] !== null && $database['prefix'] !== '') {
+        return (string) $database['prefix'];
+    }
+
+    if (is_array($database) && isset($database['table_prefix']) && $database['table_prefix'] !== null && $database['table_prefix'] !== '') {
+        return (string) $database['table_prefix'];
+    }
+
+    if (is_array($table) && isset($table['prefix']) && $table['prefix'] !== null && $table['prefix'] !== '') {
+        return (string) $table['prefix'];
+    }
+
+    return null;
+}
+
+function migration_app_is_prefix_only_config(?array $database, ?array $table): bool
+{
+    if (migration_app_explicit_prefix($database, $table) === null) {
+        return false;
+    }
+
+    if ($database === null || $database === []) {
+        return true;
+    }
+
+    $keys = array_keys(array_filter($database, static fn ($value): bool => $value !== null && $value !== ''));
+
+    return array_diff($keys, ['prefix', 'table_prefix', 'use', 'connection']) === [];
+}
+
+function migration_app_has_dedicated_connections(?array $database): bool
+{
+    if (!is_array($database) || $database === []) {
+        return false;
+    }
+
+    if (isset($database['connections']) && is_array($database['connections']) && $database['connections'] !== []) {
+        return true;
+    }
+
+    return isset($database['driver']) && is_string($database['driver']) && $database['driver'] !== '';
+}
+
+function migration_short_package_prefix(string $package): string
+{
+    $parts = array_values(array_filter(explode('_', $package)));
+    $name = end($parts) ?: $package;
+    $name = preg_replace('/[^A-Za-z0-9_]+/', '_', strtolower((string) $name)) ?? (string) $name;
+    $name = trim((string) $name, '_');
+
+    return $name === '' ? '' : $name . '_';
+}
+
+function migration_package_connection_prefix(string $root, string $package): string
+{
+    $package = trim($package);
+    if ($package === '' || $package === '~' || $package === 'platform') {
+        return migration_connection_prefix($root);
+    }
+
+    $database = migration_app_database_config($root, $package);
+    $table = migration_app_table_config($root, $package);
+    $explicit = migration_app_explicit_prefix($database, $table);
+
+    if ($explicit !== null && ($database === null || migration_app_is_prefix_only_config($database, $table))) {
+        return $explicit;
+    }
+
+    return migration_connection_prefix($root);
+}
+
+function migration_table_prefix_for_package(string $root, string $package): string
+{
+    $package = trim($package);
+    if ($package === '' || $package === '~') {
+        return '';
+    }
+
+    if ($package === 'platform') {
+        return migration_package_connection_prefix($root, $package) !== '' ? '' : migration_default_connection_prefix();
+    }
+
+    $database = migration_app_database_config($root, $package);
+    $table = migration_app_table_config($root, $package);
+    $explicit = migration_app_explicit_prefix($database, $table);
+
+    if ($explicit !== null) {
+        $connectionPrefix = migration_package_connection_prefix($root, $package);
+
+        return $connectionPrefix === $explicit ? '' : $explicit;
+    }
+
+    if (migration_app_has_dedicated_connections($database)) {
+        return '';
+    }
+
+    return migration_short_package_prefix($package);
+}
+
+function migration_table_has_prefix(string $table, string $prefix, string $package): bool
+{
+    if ($prefix !== '' && str_starts_with($table, $prefix)) {
+        return true;
+    }
+
+    if (str_starts_with($table, migration_default_connection_prefix())) {
+        return true;
+    }
+
+    return $package !== '' && str_starts_with($table, $package . '_');
+}
+
+function migration_physical_table_name(string $root, string $table, string $package): string
 {
     $table = trim($table);
     $package = trim($package);
-
     if ($table === '') {
         return '';
     }
 
-    if ($package === '' || $package === '~') {
-        return $table;
+    $name = $table;
+    $packagePrefix = migration_table_prefix_for_package($root, $package);
+    if ($packagePrefix !== '' && !migration_table_has_prefix($name, $packagePrefix, $package)) {
+        $name = $packagePrefix . $name;
     }
 
-    return $package . '_' . $table;
+    $connectionPrefix = migration_package_connection_prefix($root, $package);
+    if ($connectionPrefix !== '' && !migration_table_has_prefix($name, $connectionPrefix, $package)) {
+        $name = $connectionPrefix . $name;
+    }
+
+    return $name;
 }
 
 function replace_table_constants(string $content): string
@@ -2016,7 +2184,7 @@ function cli_actions(): array
     ];
 }
 
-function run_cli_action(string $root, string $action): array
+function run_cli_action(string $root, string $action, array $extraArgs = []): array
 {
     $platformRoot = inspector_platform_root_from_scope($root);
     $package = inspector_is_platform($platformRoot) ? inspector_active_package($platformRoot) : null;
@@ -2031,6 +2199,7 @@ function run_cli_action(string $root, string $action): array
         'pinker_clear' => ['pinker:clear', '--no-ansi'],
         'build' => ['build', '--yes', '--no-ansi'],
         'build_sign' => ['build', '--yes', '--sign', '--no-ansi'],
+        'sign_keygen' => ['pinx:sign-keygen', '--no-ansi'],
         'release_patch' => ['release', '--bump=patch', '--yes', '--no-ansi'],
         'schedule_list' => ['schedule:list', '--no-ansi'],
         'schedule_run' => ['schedule:run', '--no-ansi'],
@@ -2045,7 +2214,7 @@ function run_cli_action(string $root, string $action): array
 
     $cli = null;
     $cwd = $platformRoot;
-    $args = $commands[$action];
+    $args = array_merge($commands[$action], $extraArgs);
 
     if (is_file($platformRoot . '/pinoox')) {
         $cli = [PHP_BINARY, $platformRoot . '/pinoox'];
@@ -2190,7 +2359,7 @@ function inspector_action_message(string $action, bool $ok, string $stdout, stri
         'migrate_status' => 'Migration timeline was refreshed.',
         'pinker_rebuild' => 'Pinker cache was rebuilt from the app manifest and route files.',
         'pinker_clear' => 'Pinker cache clear command finished.',
-        'build' => 'The .pinx package build command finished. Check the Build & Release page for export files.',
+        'build' => 'The .pinx package build command finished. Check the Build & Release page for release files.',
         'build_sign' => 'The signed .pinx build command finished. Signature depends on app.php sign configuration.',
         'release_patch' => 'The app patch version was bumped and a release package build was attempted.',
         'schedule_list' => 'Schedule tasks were listed from schedule.php.',
@@ -2343,9 +2512,9 @@ function migration_files_payload(string $root): array
                 'lines' => substr_count($content, "\n") + 1,
                 'modified_at' => date(DATE_ATOM, filemtime($file) ?: time()),
                 'modified_at_label' => readable_datetime(date(DATE_ATOM, filemtime($file) ?: time())),
-                'tables' => tables_from_migration_file($file),
-                'up_sql' => migration_sql_preview($content, 'up'),
-                'down_sql' => migration_sql_preview($content, 'down'),
+                'tables' => tables_from_migration_file($file, $root),
+                'up_sql' => migration_sql_preview($content, 'up', $root),
+                'down_sql' => migration_sql_preview($content, 'down', $root),
                 'content' => substr($content, 0, 18000),
                 'truncated' => strlen($content) > 18000,
             ];
@@ -2403,7 +2572,7 @@ function migration_duration(string $name): string
     return (8 + ($sum % 55)) . 'ms';
 }
 
-function migration_sql_preview(string $content, string $method): string
+function migration_sql_preview(string $content, string $method, string $root): string
 {
     $section = migration_method_body($content, $method);
     if ($section === '') {
@@ -2415,34 +2584,34 @@ function migration_sql_preview(string $content, string $method): string
 
     if (preg_match_all('/->create\s*\(\s*\$this->table\s*\(\s*[\'"]([^\'"]+)[\'"]\s*,\s*[\'"]([^\'"]+)[\'"]\s*\)/i', $section, $matches, PREG_SET_ORDER) !== false) {
         foreach ($matches as $match) {
-            $lines[] = 'CREATE TABLE `' . migration_preview_table_name((string) $match[1], (string) $match[2]) . '` (...);';
+            $lines[] = 'CREATE TABLE `' . migration_physical_table_name($root, (string) $match[1], (string) $match[2]) . '` (...);';
         }
     }
     if (preg_match_all('/Schema::create\s*\(\s*[\'"]([^\'"]+)[\'"]/i', $section, $matches)) {
         foreach ($matches[1] as $table) {
-            $lines[] = 'CREATE TABLE `' . $table . '` (...);';
+            $lines[] = 'CREATE TABLE `' . migration_physical_table_name($root, (string) $table, 'app') . '` (...);';
         }
     }
 
     if (preg_match_all('/->table\s*\(\s*\$this->table\s*\(\s*[\'"]([^\'"]+)[\'"]\s*,\s*[\'"]([^\'"]+)[\'"]\s*\)/i', $section, $matches, PREG_SET_ORDER) !== false) {
         foreach ($matches as $match) {
-            $lines[] = 'ALTER TABLE `' . migration_preview_table_name((string) $match[1], (string) $match[2]) . '` ...;';
+            $lines[] = 'ALTER TABLE `' . migration_physical_table_name($root, (string) $match[1], (string) $match[2]) . '` ...;';
         }
     }
     if (preg_match_all('/Schema::table\s*\(\s*[\'"]([^\'"]+)[\'"]/i', $section, $matches)) {
         foreach ($matches[1] as $table) {
-            $lines[] = 'ALTER TABLE `' . $table . '` ...;';
+            $lines[] = 'ALTER TABLE `' . migration_physical_table_name($root, (string) $table, 'app') . '` ...;';
         }
     }
 
     if (preg_match_all('/dropIfExists\s*\(\s*\$this->table\s*\(\s*[\'"]([^\'"]+)[\'"]\s*,\s*[\'"]([^\'"]+)[\'"]\s*\)/i', $section, $matches, PREG_SET_ORDER) !== false) {
         foreach ($matches as $match) {
-            $lines[] = 'DROP TABLE IF EXISTS `' . migration_preview_table_name((string) $match[1], (string) $match[2]) . '`;';
+            $lines[] = 'DROP TABLE IF EXISTS `' . migration_physical_table_name($root, (string) $match[1], (string) $match[2]) . '`;';
         }
     }
     if (preg_match_all('/dropIfExists\s*\(\s*[\'"]([^\'"]+)[\'"]/i', $section, $matches)) {
         foreach ($matches[1] as $table) {
-            $lines[] = 'DROP TABLE IF EXISTS `' . $table . '`;';
+            $lines[] = 'DROP TABLE IF EXISTS `' . migration_physical_table_name($root, (string) $table, 'app') . '`;';
         }
     }
 
@@ -3250,25 +3419,60 @@ function pinker_payload(string $root): array
     ];
 }
 
-function build_payload(string $root): array
+function pinx_keys_dir(string $root): string
 {
-    $app = app_config($root);
-    $package = (string) ($app['package'] ?? basename($root));
-    $versionName = (string) ($app['version-name'] ?? '1.0.0');
-    $versionCode = (int) ($app['version-code'] ?? 1);
-    $sign = is_array($app['pinx']['sign'] ?? null) ? $app['pinx']['sign'] : [];
-    $keyPath = (string) ($sign['key'] ?? '');
-    $resolvedKeyPath = $keyPath !== '' ? inspector_resolve_shared_path($root, $keyPath) : '';
-    $exportDir = $root . '/export';
-    $exports = [];
-    $vendorDir = inspector_vendor_dir($root);
+    return rtrim(normalize_path($root), '/') . '/pinx/keys';
+}
 
-    if (is_dir($exportDir)) {
-        foreach (glob($exportDir . '/*.{pinx,zip,json}', GLOB_BRACE) ?: [] as $file) {
+function pinx_releases_dir(string $root): string
+{
+    return rtrim(normalize_path($root), '/') . '/pinx/releases';
+}
+
+function pinx_legacy_export_dir(string $root): string
+{
+    return rtrim(normalize_path($root), '/') . '/export';
+}
+
+function pinx_resolve_sign_key_path(string $root, string $relative = ''): string
+{
+    $relative = trim(str_replace('\\', '/', $relative));
+    $candidates = [];
+
+    if ($relative !== '') {
+        $candidates[] = inspector_resolve_shared_path($root, $relative);
+    }
+
+    $candidates[] = pinx_keys_dir($root) . '/sign.key.json';
+    $candidates[] = rtrim(normalize_path($root), '/') . '/pinx/sign.key.json';
+
+    foreach ($candidates as $candidate) {
+        if ($candidate !== '' && is_file($candidate)) {
+            return normalize_path($candidate);
+        }
+    }
+
+    return $relative !== ''
+        ? normalize_path(inspector_resolve_shared_path($root, $relative))
+        : normalize_path(pinx_keys_dir($root) . '/sign.key.json');
+}
+
+function pinx_collect_release_entries(string $root): array
+{
+    $exports = [];
+    $directories = [pinx_releases_dir($root), pinx_legacy_export_dir($root)];
+
+    foreach ($directories as $directory) {
+        if (!is_dir($directory)) {
+            continue;
+        }
+
+        foreach (glob($directory . '/*.{pinx,zip,json}', GLOB_BRACE) ?: [] as $file) {
             if (!is_file($file)) {
                 continue;
             }
-            $exports[] = [
+
+            $exports[normalize_path($file)] = [
                 'name' => basename($file),
                 'path' => normalize_path($file),
                 'size' => filesize($file) ?: 0,
@@ -3279,13 +3483,33 @@ function build_payload(string $root): array
         }
     }
 
+    $exports = array_values($exports);
     usort($exports, static fn (array $a, array $b): int => strcmp((string) ($b['modified_at'] ?? ''), (string) ($a['modified_at'] ?? '')));
+
+    return $exports;
+}
+
+function build_payload(string $root): array
+{
+    $app = app_config($root);
+    $package = (string) ($app['package'] ?? basename($root));
+    $versionName = (string) ($app['version-name'] ?? '1.0.0');
+    $versionCode = (int) ($app['version-code'] ?? 1);
+    $sign = is_array($app['pinx']['sign'] ?? null) ? $app['pinx']['sign'] : [];
+    $keyPath = (string) ($sign['key'] ?? '');
+    if ($keyPath === '') {
+        $keyPath = 'pinx/keys/sign.key.json';
+    }
+    $resolvedKeyPath = pinx_resolve_sign_key_path($root, $keyPath);
+    $releasesDir = pinx_releases_dir($root);
+    $exports = pinx_collect_release_entries($root);
+    $vendorDir = inspector_vendor_dir($root);
     $pinker = pinker_payload($root);
     $checks = [
         ['label' => 'Manifest', 'value' => is_file($root . '/app.php') ? 'Ready' : 'Missing', 'ok' => is_file($root . '/app.php')],
         ['label' => 'Composer vendor', 'value' => is_dir($vendorDir) ? 'Installed' : 'Missing', 'ok' => is_dir($vendorDir)],
         ['label' => 'Pinker cache', 'value' => is_dir($root . '/pinker') ? 'Ready' : 'Not built', 'ok' => is_dir($root . '/pinker')],
-        ['label' => 'Export folder', 'value' => is_dir($exportDir) ? 'Ready' : 'Created on build', 'ok' => true],
+        ['label' => 'Release folder', 'value' => is_dir($releasesDir) ? 'Ready' : 'Created on build', 'ok' => true],
         ['label' => 'Signing', 'value' => !empty($sign['enabled']) ? 'Enabled' : 'Disabled', 'ok' => empty($sign['enabled']) || ($resolvedKeyPath !== '' && is_file($resolvedKeyPath)) || !empty($sign['key_id'])],
     ];
 
@@ -3316,7 +3540,9 @@ function build_payload(string $root): array
         'paths' => [
             'app' => normalize_path($root),
             'manifest' => normalize_path($root . '/app.php'),
-            'export' => normalize_path($exportDir),
+            'releases' => normalize_path($releasesDir),
+            'keys' => normalize_path(pinx_keys_dir($root)),
+            'export' => normalize_path($releasesDir),
             'vendor' => $vendorDir,
             'storage' => inspector_storage_dir($root),
         ],
@@ -3343,9 +3569,9 @@ function build_sign_payload(string $root, array $payload): array
 
     $app['pinx'] = is_array($app['pinx'] ?? null) ? $app['pinx'] : [];
     $sign = is_array($app['pinx']['sign'] ?? null) ? $app['pinx']['sign'] : [];
-    $keyDir = inspector_storage_dir($root, 'pinx/signing');
-    $keyFile = $keyDir . '/development.sign.key';
-    $relativeKey = 'storage/pinx/signing/development.sign.key';
+    $keyDir = pinx_keys_dir($root);
+    $keyFile = $keyDir . '/sign.key.json';
+    $relativeKey = 'pinx/keys/sign.key.json';
 
     if ($action === 'generate') {
         if (!is_dir($keyDir)) {
@@ -3355,19 +3581,25 @@ function build_sign_payload(string $root, array $payload): array
             throw new RuntimeException('Signing key directory is not writable: ' . normalize_path($keyDir));
         }
 
-        $secret = bin2hex(random_bytes(32));
-        $keyId = 'dev-' . substr(hash('sha256', $secret . '|' . ($app['package'] ?? basename($root))), 0, 16);
-        $content = json_encode([
-            'type' => 'pinx-development-signing-key',
-            'key_id' => $keyId,
-            'secret' => $secret,
-            'created_at' => date(DATE_ATOM),
-            'app' => (string) ($app['package'] ?? basename($root)),
-        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . PHP_EOL;
-        file_put_contents($keyFile, $content, LOCK_EX);
+        $legacyKey = rtrim(normalize_path($root), '/') . '/pinx/sign.key.json';
+        $force = is_file($keyFile) || is_file($legacyKey);
+        $generate = run_cli_action($root, 'sign_keygen', $force ? ['--force'] : []);
+        if (empty($generate['ok'])) {
+            $message = trim((string) ($generate['stderr'] ?? ''));
+            if ($message === '') {
+                $message = trim((string) ($generate['stdout'] ?? ''));
+            }
+            throw new RuntimeException($message !== '' ? $message : 'Unable to generate signing key through Pinx CLI.');
+        }
+
         $sign['enabled'] = true;
         $sign['key'] = $relativeKey;
-        $sign['key_id'] = $keyId;
+        if (is_file($keyFile)) {
+            $decoded = json_decode((string) file_get_contents($keyFile), true);
+            if (is_array($decoded) && !empty($decoded['key_id'])) {
+                $sign['key_id'] = (string) $decoded['key_id'];
+            }
+        }
         $sign['require'] = (bool) ($sign['require'] ?? false);
     } elseif ($action === 'enable') {
         $sign['enabled'] = true;
@@ -3399,7 +3631,7 @@ function build_sign_payload(string $root, array $payload): array
     write_php_array_file($manifest, $app);
 
     $messages = [
-        'generate' => 'Development signing key was generated and signing was enabled.',
+        'generate' => 'Signing key was generated in pinx/keys/ and signing was enabled.',
         'enable' => 'Package signing was enabled.',
         'disable' => 'Package signing was disabled.',
         'require' => 'Package signing is now required for release builds.',
