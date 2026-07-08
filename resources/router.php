@@ -3119,9 +3119,14 @@ function pinker_payload(string $root): array
     $routesCache = $cache . '/routes.php';
     $viewsCache = $cache . '/views.php';
     $configFiles = config_files_payload($root, false);
-    $routesSummary = inspector_routes_summary($root);
-    $viewsCount = inspector_template_count($root);
-    $pinkerFiles = is_dir($pinker) ? directory_files($pinker, []) : [];
+    $routeCount = inspector_pinker_route_count($routesCache);
+    if ($routeCount === null) {
+        $routesSummary = inspector_routes_summary($root);
+        $routeCount = (int) ($routesSummary['routes'] ?? 0);
+    }
+    $routeFileCount = inspector_route_file_count($root);
+    $viewsCount = inspector_pinker_view_count($viewsCache) ?? inspector_template_count($root);
+    $pinkerFiles = is_dir($appPinker) ? directory_files($appPinker, []) : [];
     $lastBuild = last_modified_time($pinkerFiles);
     $dependencies = array_merge((array) ($composer['require'] ?? []), (array) ($composer['require-dev'] ?? []));
     $dependencyRows = [];
@@ -3135,7 +3140,7 @@ function pinker_payload(string $root): array
     $checks = [
         ['label' => 'Pinker Directory', 'value' => is_dir($pinker) ? 'Available' : 'Not built', 'ok' => is_dir($pinker)],
         ['label' => 'Manifest Metadata', 'value' => is_file($root . '/app.php') ? 'Readable' : 'Missing', 'ok' => is_file($root . '/app.php')],
-        ['label' => 'Routes Cache', 'value' => $routesSummary['routes'] . ' routes', 'ok' => is_file($routesCache)],
+        ['label' => 'Routes Cache', 'value' => $routeCount . ' routes', 'ok' => is_file($routesCache)],
         ['label' => 'Views Cache', 'value' => $viewsCount . ' views', 'ok' => is_file($viewsCache) || $viewsCount > 0],
         ['label' => 'Config Metadata', 'value' => count($configFiles) . ' files', 'ok' => true],
         ['label' => 'Cache Files', 'value' => count($pinkerFiles) . ' files', 'ok' => count($pinkerFiles) > 0],
@@ -3157,9 +3162,9 @@ function pinker_payload(string $root): array
             'icon' => (string) ($app['icon'] ?? 'resource/icon.png'),
         ],
         'overview' => [
-            'routes_cache' => ['status' => is_file($routesCache) ? 'Built' : 'Pending', 'count' => $routesSummary['routes'], 'note' => 'routes cached'],
+            'routes_cache' => ['status' => is_file($routesCache) ? 'Built' : 'Pending', 'count' => $routeCount, 'note' => 'routes cached'],
             'views_cache' => ['status' => is_file($viewsCache) || $viewsCount > 0 ? 'Built' : 'Pending', 'count' => $viewsCount, 'note' => 'views scanned'],
-            'api_cache' => ['status' => is_file($pinker . '/platform/app-router.config.php') ? 'Built' : 'Pending', 'count' => count($routesSummary['files']), 'note' => 'route files'],
+            'api_cache' => ['status' => is_file($pinker . '/platform/app-router.config.php') ? 'Built' : 'Pending', 'count' => $routeFileCount, 'note' => 'route files'],
             'config_cache' => ['status' => 'Scanned', 'count' => count($configFiles), 'note' => 'config files'],
             'cache_files' => ['status' => count($pinkerFiles) > 0 ? 'Available' : 'Empty', 'count' => count($pinkerFiles), 'note' => 'pinker files'],
             'cache_size' => ['value' => format_bytes(array_sum(array_map(static fn (string $file): int => filesize($file) ?: 0, $pinkerFiles))), 'note' => 'pinker cache size'],
@@ -3885,6 +3890,46 @@ function inspector_template_count(string $root): int
     }
 
     return $count;
+}
+
+function inspector_pinker_cache_array(string $cacheFile): ?array
+{
+    if (!is_file($cacheFile)) {
+        return null;
+    }
+
+    $data = @include $cacheFile;
+
+    return is_array($data) ? $data : null;
+}
+
+function inspector_pinker_route_count(string $routesCache): ?int
+{
+    $data = inspector_pinker_cache_array($routesCache);
+    if ($data === null) {
+        return null;
+    }
+
+    if (isset($data['actions']) && is_array($data['actions'])) {
+        return count($data['actions']);
+    }
+
+    return count($data);
+}
+
+function inspector_pinker_view_count(string $viewsCache): ?int
+{
+    $data = inspector_pinker_cache_array($viewsCache);
+    if ($data === null) {
+        return null;
+    }
+
+    return count($data);
+}
+
+function inspector_route_file_count(string $root): int
+{
+    return count(discover_route_files($root));
 }
 
 function inspector_view_scan_bases(string $root): array

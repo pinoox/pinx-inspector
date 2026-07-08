@@ -7,8 +7,21 @@
       const join = url.includes('?') ? '&' : '?';
       return url + join + 'package=' + encodeURIComponent(state.activePackage);
     };
-    const api = (url) => fetch(base + scopedUrl(url), { cache: 'no-store' }).then(r => r.json());
-    const post = (url, body) => fetch(base + scopedUrl(url), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }).then(r => r.json());
+    async function fetchJson(url, options = {}) {
+      const response = await fetch(base + scopedUrl(url), { cache: 'no-store', ...options });
+      let payload = null;
+      try {
+        payload = await response.json();
+      } catch {
+        throw new Error('Inspector returned an invalid response.');
+      }
+      if (!response.ok || payload?.error) {
+        throw new Error(payload?.message || `Request failed (${response.status}).`);
+      }
+      return payload;
+    }
+    const api = (url) => fetchJson(url);
+    const post = (url, body) => fetchJson(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
     const esc = (value) => String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
     const cell = (value) => typeof value === 'object' && value !== null ? '<code>' + esc(JSON.stringify(value, null, 2)) + '</code>' : esc(value);
     const iconPaths = {
@@ -216,7 +229,9 @@
         setHtml('themesContent', loadingPanel('Loading themes', 'Reading installed app and theme metadata.'));
         setHtml('themeDetails', compactLoading('Loading theme details'));
       } else if (view === 'pinker') {
-        setHtml('pinkerContent', loadingPanel('Loading Pinker', 'Reading package, cache, build, and export status.'));
+        setHtml('pinkerOverview', loadingPanel('Loading Pinker', 'Reading package, cache, and build metadata.'));
+        setHtml('pinkerBuildStatus', compactLoading('Loading cache health'));
+        setHtml('pinkerRecentBuilds', compactLoading('Loading cache files'));
         setHtml('pinkerDetails', compactLoading('Loading package details'));
       } else if (view === 'build') {
         setHtml('buildSummary', loadingPanel('Loading build status', 'Checking release readiness and signing setup.'));
@@ -1860,8 +1875,15 @@
       `;
     }
 
+    function sectionErrorPanel(title, message) {
+      return `<div class="rounded-2xl border border-rose-300/20 bg-rose-400/10 p-5 text-rose-100"><div class="font-bold">${esc(title)}</div><div class="mt-1 text-sm opacity-80">${esc(message)}</div><button onclick="state.loaded.pinker=false; loadViewData('pinker', true)" class="mt-4 rounded-xl bg-rose-200 px-4 py-2 text-sm font-bold text-rose-950">Retry</button></div>`;
+    }
+
     async function loadPinker() {
       state.pinker = await api('/api/pinker');
+      if (!state.pinker?.package) {
+        throw new Error('Pinker response did not include package metadata.');
+      }
       renderPinker();
     }
 
@@ -3348,7 +3370,14 @@
         }
         state.loaded[view] = true;
       })().catch(error => {
-        showOperation('danger', 'Could not load section', error.message || `${view} failed to load.`);
+        const message = error.message || `${view} failed to load.`;
+        showOperation('danger', 'Could not load section', message);
+        if (view === 'pinker') {
+          setHtml('pinkerOverview', sectionErrorPanel('Pinker could not load', message));
+          setHtml('pinkerBuildStatus', '');
+          setHtml('pinkerRecentBuilds', '');
+          setHtml('pinkerDetails', sectionErrorPanel('Pinker unavailable', message));
+        }
       }).finally(() => {
         delete state.loading[view];
       });
@@ -3454,3 +3483,4 @@
       }
       if ($('databaseContent')) $('databaseContent').innerHTML = '<div class="rounded-3xl border border-rose-400/20 bg-rose-400/10 p-6 text-rose-200">' + esc(error.message) + '</div>';
     });
+    window.state = state;
