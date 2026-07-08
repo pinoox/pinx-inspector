@@ -3055,6 +3055,10 @@ function themes_payload(string $root): array
             $config = theme_config_payload($dir);
             $themeLangPaths = inspector_manifest_lang_paths_for_theme($root, $dir);
             $themeSlug = title_from_slug($name);
+            $fileCount = count($files);
+            $viewCount = count(array_filter($files, static fn (string $file): bool => view_extension($file) !== 'Asset'));
+            $totalSize = array_sum(array_map(static fn (string $file): int => filesize($file) ?: 0, $files));
+            $updatedAt = theme_latest_mtime($files, $dir);
             $themes[] = [
                 'name' => $name,
                 'title' => inspector_manifest_resolve_label(
@@ -3081,13 +3085,13 @@ function themes_payload(string $root): array
                 'path' => 'theme/' . $name,
                 'active' => $name === $active,
                 'status' => $name === $active ? 'active' : 'inactive',
-                'updated_at' => theme_updated_at($dir),
-                'updated_at_label' => readable_datetime(date(DATE_ATOM, theme_updated_at($dir))),
-                'files' => count($files),
-                'views' => count(array_filter($files, static fn (string $file): bool => view_extension($file) !== 'Asset')),
-                'size' => array_sum(array_map(static fn (string $file): int => filesize($file) ?: 0, $files)),
-                'size_label' => format_bytes(array_sum(array_map(static fn (string $file): int => filesize($file) ?: 0, $files))),
-                'colors' => theme_colors($dir),
+                'updated_at' => date(DATE_ATOM, $updatedAt),
+                'updated_at_label' => readable_datetime(date(DATE_ATOM, $updatedAt)),
+                'files' => $fileCount,
+                'views' => $viewCount,
+                'size' => $totalSize,
+                'size_label' => format_bytes($totalSize),
+                'colors' => theme_colors_from_files($files),
                 'preview' => ($previewRelative = theme_preview_payload($root, $dir)),
                 'preview_url' => inspector_public_asset_url($root, $previewRelative),
             ];
@@ -3121,7 +3125,6 @@ function pinker_payload(string $root): array
     $configFiles = config_payload($root)['files'] ?? [];
     $views = views_payload($root);
     $routes = routes_payload($root);
-    $allFiles = directory_files($root, ['vendor', 'storage/logs']);
     $pinkerFiles = is_dir($pinker) ? directory_files($pinker, []) : [];
     $lastBuild = last_modified_time($pinkerFiles);
     $dependencies = array_merge((array) ($composer['require'] ?? []), (array) ($composer['require-dev'] ?? []));
@@ -3396,7 +3399,7 @@ function directory_files(string $root, array $ignore): array
         return [];
     }
     $files = [];
-    $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS));
+    $iterator = inspector_recursive_file_iterator($root);
     foreach ($iterator as $item) {
         if (!$item instanceof SplFileInfo || !$item->isFile()) {
             continue;
@@ -3407,6 +3410,9 @@ function directory_files(string $root, array $ignore): array
             if (str_starts_with($relative, trim($part, '/') . '/')) {
                 continue 2;
             }
+        }
+        if (config_path_ignored($root, $path)) {
+            continue;
         }
         $files[] = $path;
     }
@@ -3759,7 +3765,7 @@ function theme_files(string $dir): array
         return [];
     }
     $files = [];
-    $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS));
+    $iterator = inspector_recursive_file_iterator($dir);
     foreach ($iterator as $item) {
         if ($item instanceof SplFileInfo && $item->isFile()) {
             $files[] = $item->getPathname();
@@ -3780,23 +3786,41 @@ function theme_config_payload(string $dir): array
     return [];
 }
 
+function theme_latest_mtime(array $files, string $dir): int
+{
+    $times = array_map(static fn (string $file): int => filemtime($file) ?: 0, $files);
+
+    return max($times ?: [filemtime($dir) ?: time()]);
+}
+
+function theme_colors_from_files(array $files): array
+{
+    $css = '';
+    $scanned = 0;
+    foreach ($files as $file) {
+        if ($scanned >= 48) {
+            break;
+        }
+        if (!in_array(strtolower(pathinfo($file, PATHINFO_EXTENSION)), ['css', 'scss', 'twig', 'php'], true)) {
+            continue;
+        }
+        $css .= "\n" . substr((string) file_get_contents($file), 0, 8000);
+        $scanned++;
+    }
+    preg_match_all('/#[0-9a-f]{3,8}\b/i', $css, $matches);
+    $colors = array_values(array_unique(array_map('strtolower', $matches[0] ?? [])));
+
+    return array_slice($colors ?: ['#7c3aed', '#38bdf8', '#22c55e', '#f97316'], 0, 6);
+}
+
 function theme_updated_at(string $dir): int
 {
-    $times = array_map(static fn (string $file): int => filemtime($file) ?: 0, theme_files($dir));
-    return max($times ?: [filemtime($dir) ?: time()]);
+    return theme_latest_mtime(theme_files($dir), $dir);
 }
 
 function theme_colors(string $dir): array
 {
-    $css = '';
-    foreach (theme_files($dir) as $file) {
-        if (in_array(strtolower(pathinfo($file, PATHINFO_EXTENSION)), ['css', 'scss', 'twig', 'php'], true)) {
-            $css .= "\n" . substr((string) file_get_contents($file), 0, 8000);
-        }
-    }
-    preg_match_all('/#[0-9a-f]{3,8}\b/i', $css, $matches);
-    $colors = array_values(array_unique(array_map('strtolower', $matches[0] ?? [])));
-    return array_slice($colors ?: ['#7c3aed', '#38bdf8', '#22c55e', '#f97316'], 0, 6);
+    return theme_colors_from_files(theme_files($dir));
 }
 
 function theme_preview_payload(string $root, string $dir): ?string
@@ -4388,7 +4412,7 @@ function config_path_ignored(string $root, string $file): bool
 
 function inspector_scan_ignored_dir(string $name): bool
 {
-    return in_array(strtolower($name), ['node_modules', 'vendor', '.git', 'dist'], true);
+    return in_array(strtolower($name), ['node_modules', 'vendor', '.git', 'dist', '.vite', 'coverage'], true);
 }
 
 function inspector_recursive_file_iterator(string $base): RecursiveIteratorIterator
