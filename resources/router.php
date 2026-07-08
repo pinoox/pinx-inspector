@@ -3424,9 +3424,19 @@ function pinx_keys_dir(string $root): string
     return rtrim(normalize_path($root), '/') . '/pinx/keys';
 }
 
-function pinx_releases_dir(string $root): string
+function pinx_export_dir(string $root): string
+{
+    return rtrim(normalize_path($root), '/') . '/pinx/export';
+}
+
+function pinx_legacy_releases_dir(string $root): string
 {
     return rtrim(normalize_path($root), '/') . '/pinx/releases';
+}
+
+function pinx_releases_dir(string $root): string
+{
+    return pinx_export_dir($root);
 }
 
 function pinx_legacy_export_dir(string $root): string
@@ -3460,7 +3470,7 @@ function pinx_resolve_sign_key_path(string $root, string $relative = ''): string
 function pinx_collect_release_entries(string $root): array
 {
     $exports = [];
-    $directories = [pinx_releases_dir($root), pinx_legacy_export_dir($root)];
+    $directories = [pinx_export_dir($root), pinx_legacy_releases_dir($root), pinx_legacy_export_dir($root)];
 
     foreach ($directories as $directory) {
         if (!is_dir($directory)) {
@@ -3501,7 +3511,7 @@ function build_payload(string $root): array
         $keyPath = 'pinx/keys/sign.key.json';
     }
     $resolvedKeyPath = pinx_resolve_sign_key_path($root, $keyPath);
-    $releasesDir = pinx_releases_dir($root);
+    $exportDir = pinx_export_dir($root);
     $exports = pinx_collect_release_entries($root);
     $vendorDir = inspector_vendor_dir($root);
     $pinker = pinker_payload($root);
@@ -3509,7 +3519,7 @@ function build_payload(string $root): array
         ['label' => 'Manifest', 'value' => is_file($root . '/app.php') ? 'Ready' : 'Missing', 'ok' => is_file($root . '/app.php')],
         ['label' => 'Composer vendor', 'value' => is_dir($vendorDir) ? 'Installed' : 'Missing', 'ok' => is_dir($vendorDir)],
         ['label' => 'Pinker cache', 'value' => is_dir($root . '/pinker') ? 'Ready' : 'Not built', 'ok' => is_dir($root . '/pinker')],
-        ['label' => 'Release folder', 'value' => is_dir($releasesDir) ? 'Ready' : 'Created on build', 'ok' => true],
+        ['label' => 'Export folder', 'value' => is_dir($exportDir) ? 'Ready' : 'Created on build', 'ok' => true],
         ['label' => 'Signing', 'value' => !empty($sign['enabled']) ? 'Enabled' : 'Disabled', 'ok' => empty($sign['enabled']) || ($resolvedKeyPath !== '' && is_file($resolvedKeyPath)) || !empty($sign['key_id'])],
     ];
 
@@ -3540,9 +3550,9 @@ function build_payload(string $root): array
         'paths' => [
             'app' => normalize_path($root),
             'manifest' => normalize_path($root . '/app.php'),
-            'releases' => normalize_path($releasesDir),
+            'releases' => normalize_path($exportDir),
             'keys' => normalize_path(pinx_keys_dir($root)),
-            'export' => normalize_path($releasesDir),
+            'export' => normalize_path($exportDir),
             'vendor' => $vendorDir,
             'storage' => inspector_storage_dir($root),
         ],

@@ -2078,7 +2078,7 @@
           <button onclick="manageBuildSigning('${sign.enabled ? 'disable' : 'enable'}')" class="rounded-xl border ${sign.enabled ? 'border-rose-300/20 bg-rose-400/10 text-rose-100 hover:bg-rose-400/15' : 'border-emerald-300/20 bg-emerald-400/10 text-emerald-100 hover:bg-emerald-400/15'} px-4 py-3 text-left text-sm font-bold">${sign.enabled ? 'Disable Signing' : 'Enable Signing'}</button>
           <button onclick="manageBuildSigning('${sign.require ? 'optional' : 'require'}')" class="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-left text-sm font-bold text-slate-200 hover:bg-white/10">${sign.require ? 'Make Signing Optional' : 'Require Signing for Release'}</button>
         </div>
-        <p class="mt-4 rounded-2xl border border-white/10 bg-white/[.03] p-3 text-sm leading-6 text-slate-500">Signing keys live in <code>pinx/keys/</code> and release packages in <code>pinx/releases/</code>. Keep private keys out of git.</p>
+        <p class="mt-4 rounded-2xl border border-white/10 bg-white/[.03] p-3 text-sm leading-6 text-slate-500">Signing keys live in <code>pinx/keys/</code> and build output in <code>pinx/export/</code>. Keep private keys out of git.</p>
       `;
     }
 
