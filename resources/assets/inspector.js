@@ -560,7 +560,7 @@
       state.queryBuilderMode = mode === 'raw' ? 'raw' : 'builder';
       if (state.queryBuilderMode === 'raw') {
         state.queryPanelTab = 'sql';
-        showOperation('warn', 'Raw SQL', 'You can run SELECT queries and local development write queries from this panel.');
+        showOperation('info', 'Raw SQL', 'Run read and write SQL against the active local development connection, including DevDB JSON.');
       }
       renderQueryTabs();
       renderQueryPanel();
@@ -712,13 +712,42 @@
       ` : '<div class="grid min-h-[300px] place-items-center p-8 text-center text-slate-500">No rows were returned.</div>';
     }
 
+    function queryRawSqlNotice() {
+      const connection = state.database?.connection || {};
+      const engine = connection.engine || '';
+      const label = connection.engine_label || connection.name || 'local development';
+      if (connection.raw_sql_supported === false) {
+        return {
+          tone: 'amber',
+          title: 'Raw SQL is unavailable for this connection',
+          message: 'Install pinoox/devdb to execute SQL against DevDB JSON storage.',
+        };
+      }
+      if (engine.startsWith('devdb')) {
+        return {
+          tone: 'sky',
+          title: 'Raw SQL on DevDB',
+          message: 'Run SELECT, INSERT, UPDATE, DELETE, and multi-statement scripts against the active DevDB engine (JSON or SQLite). Changes affect local development data only.',
+        };
+      }
+      return {
+        tone: 'sky',
+        title: 'Raw SQL on local development connection',
+        message: 'Inspector executes SQL against the active connection (' + label + '). Write queries change local development data only.',
+      };
+    }
+
     function renderQuerySqlPanel() {
       const warnings = queryWarnings();
+      const notice = queryRawSqlNotice();
+      const noticeTone = notice.tone === 'amber'
+        ? 'border-amber-300/20 bg-amber-300/10 text-amber-100'
+        : 'border-sky-300/20 bg-sky-400/10 text-sky-100';
       const rawSql = state.queryRawSql || querySql();
       return `<div class="space-y-4 p-4">
-        <div class="rounded-2xl border border-amber-300/20 bg-amber-300/10 p-4 text-amber-100">
-          <div class="font-bold">Raw SQL runs only on your local development connection</div>
-          <div class="mt-1 text-sm opacity-80">Inspector can execute SQL for PDO connections and DevDB SQLite. DevDB JSON shows a clear unsupported message.</div>
+        <div class="rounded-2xl border ${noticeTone} p-4">
+          <div class="font-bold">${esc(notice.title)}</div>
+          <div class="mt-1 text-sm opacity-80">${esc(notice.message)}</div>
         </div>
         ${warnings.map(item => `<div class="rounded-2xl border border-sky-300/20 bg-sky-400/10 p-4 text-sky-100"><div class="font-bold">${esc(item.title)}</div><div class="mt-1 text-sm opacity-80">${esc(item.message)}</div></div>`).join('')}
         <div class="overflow-hidden rounded-2xl border border-white/10 bg-[#06101c]">
