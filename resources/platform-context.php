@@ -9,6 +9,116 @@ function inspector_is_platform(string $root): bool
     return is_dir($root . '/apps') && !is_file($root . '/app.php');
 }
 
+function inspector_is_serve_locked(string $platformRoot): bool
+{
+    $platformRoot = normalize_path($platformRoot);
+
+    if (!inspector_is_platform($platformRoot)) {
+        return true;
+    }
+
+    $binding = inspector_env_value('PINOOX_SERVE_APP');
+
+    if ($binding === '' || strtolower($binding) === 'platform') {
+        return false;
+    }
+
+    return inspector_resolve_package_alias($platformRoot, $binding) !== null;
+}
+
+function inspector_locked_package(string $platformRoot): ?string
+{
+    $platformRoot = normalize_path($platformRoot);
+
+    if (!inspector_is_platform($platformRoot)) {
+        return inspector_app_package($platformRoot, $platformRoot);
+    }
+
+    if (!inspector_is_serve_locked($platformRoot)) {
+        return null;
+    }
+
+    foreach ([
+        inspector_env_value('PINOOX_SERVE_APP'),
+        inspector_env_value('PINX_INSPECTOR_PACKAGE'),
+        inspector_env_value('PINX_INSPECTOR_DEFAULT_PACKAGE'),
+        inspector_env_value('PINOOX_DEV_APP'),
+        inspector_env_value('PINX_PACKAGE'),
+    ] as $candidate) {
+        if ($candidate === '' || strtolower($candidate) === 'platform') {
+            continue;
+        }
+
+        $resolved = inspector_resolve_package_alias($platformRoot, $candidate);
+
+        if ($resolved !== null) {
+            return $resolved;
+        }
+    }
+
+    $fromPincore = inspector_pincore_dev_package($platformRoot);
+
+    return $fromPincore !== null && inspector_validate_package($platformRoot, $fromPincore) !== null
+        ? $fromPincore
+        : null;
+}
+
+function inspector_app_list_item(string $platformRoot, string $package): ?array
+{
+    $platformRoot = normalize_path($platformRoot);
+
+    foreach (inspector_list_apps($platformRoot) as $app) {
+        if ((string) ($app['package'] ?? '') === $package) {
+            return $app;
+        }
+    }
+
+    $appRoot = inspector_app_root_for_package($platformRoot, $package);
+
+    if (!is_file($appRoot . '/app.php')) {
+        return null;
+    }
+
+    $config = app_config($appRoot);
+    $router = inspector_app_router_map($platformRoot);
+
+    return [
+        'package' => $package,
+        'name' => inspector_app_display_name($appRoot, $config, null, null, $platformRoot),
+        'title' => inspector_app_title($appRoot, $config, null, null, $platformRoot),
+        'theme' => (string) ($config['theme'] ?? 'default'),
+        'enabled' => (bool) ($config['enable'] ?? true),
+        'version_name' => (string) ($config['version-name'] ?? '1.0.0'),
+        'mount' => inspector_app_mount($package, $router),
+        'path' => str_starts_with($appRoot, $platformRoot . '/apps/')
+            ? 'apps/' . $package
+            : ltrim(substr($appRoot, strlen($platformRoot)), '/'),
+    ];
+}
+
+function inspector_visible_apps(string $platformRoot): array
+{
+    $platformRoot = normalize_path($platformRoot);
+
+    if (!inspector_is_platform($platformRoot)) {
+        return [];
+    }
+
+    if (!inspector_is_serve_locked($platformRoot)) {
+        return inspector_list_apps($platformRoot);
+    }
+
+    $lockedPackage = inspector_locked_package($platformRoot);
+
+    if ($lockedPackage === null) {
+        return [];
+    }
+
+    $item = inspector_app_list_item($platformRoot, $lockedPackage);
+
+    return $item !== null ? [$item] : [];
+}
+
 function inspector_platform_root_from_scope(string $scopeRoot): string
 {
     $scopeRoot = normalize_path($scopeRoot);
@@ -134,6 +244,93 @@ function inspector_app_mount(string $package, array $router): string
     return '/';
 }
 
+function inspector_env_value(string $key): string
+{
+    foreach ([$_SERVER[$key] ?? null, $_ENV[$key] ?? null, getenv($key)] as $value) {
+        if (is_string($value) && trim($value) !== '') {
+            return trim($value);
+        }
+    }
+
+    return '';
+}
+
+function inspector_parse_package_binding(string $value): ?string
+{
+    $value = trim($value);
+
+    if ($value === '') {
+        return null;
+    }
+
+    if (str_contains($value, '@')) {
+        [$package] = explode('@', $value, 2);
+        $package = trim($package);
+
+        if ($package !== '' && !str_contains($package, '/')) {
+            return $package;
+        }
+    }
+
+    if (preg_match('/^com_[a-z0-9_]+$/i', $value) === 1) {
+        return $value;
+    }
+
+    return null;
+}
+
+function inspector_bootstrap_pincore(string $platformRoot): bool
+{
+    static $booted = [];
+
+    $platformRoot = normalize_path($platformRoot);
+
+    if (isset($booted[$platformRoot])) {
+        return $booted[$platformRoot];
+    }
+
+    $autoload = $platformRoot . '/vendor/autoload.php';
+
+    if (!is_file($autoload)) {
+        return $booted[$platformRoot] = false;
+    }
+
+    require_once $autoload;
+
+    return $booted[$platformRoot] = true;
+}
+
+function inspector_pincore_dev_package(string $platformRoot): ?string
+{
+    if (!inspector_bootstrap_pincore($platformRoot) || !class_exists(\Pinoox\Support\DevApp::class)) {
+        return null;
+    }
+
+    $package = \Pinoox\Support\DevApp::package($platformRoot);
+
+    return is_string($package) && $package !== '' ? $package : null;
+}
+
+function inspector_pincore_app_path(string $platformRoot, string $package): ?string
+{
+    if (!inspector_bootstrap_pincore($platformRoot)) {
+        return null;
+    }
+
+    if (class_exists(\Pinoox\Portal\App\AppEngine::class)) {
+        try {
+            if (\Pinoox\Portal\App\AppEngine::exists($package)) {
+                return normalize_path(\Pinoox\Portal\App\AppEngine::path($package));
+            }
+        } catch (Throwable) {
+        }
+    }
+
+    $appRoot = normalize_path($platformRoot . '/apps/' . $package);
+
+    return is_file($appRoot . '/app.php') ? $appRoot : null;
+}
+
 function inspector_request_package(string $platformRoot): ?string
 {
     $package = trim((string) ($_GET['package'] ?? $_SERVER['HTTP_X_PINX_APP'] ?? ''));
@@ -148,15 +345,14 @@ function inspector_request_package(string $platformRoot): ?string
 function inspector_default_package(string $platformRoot): ?string
 {
     foreach ([
-        (string) (getenv('PINX_INSPECTOR_DEFAULT_PACKAGE') ?: ''),
-        (string) (getenv('PINX_INSPECTOR_PACKAGE') ?: ''),
-        (string) (getenv('PINOOX_SERVE_APP') ?: ''),
-        (string) (getenv('SERVER_APP') ?: ''),
-        (string) (getenv('PINOOX_DEV_APP') ?: ''),
-        (string) (getenv('PINX_PACKAGE') ?: ''),
+        inspector_env_value('PINX_INSPECTOR_DEFAULT_PACKAGE'),
+        inspector_env_value('PINX_INSPECTOR_PACKAGE'),
+        inspector_env_value('PINOOX_SERVE_APP'),
+        inspector_env_value('SERVER_APP'),
+        inspector_env_value('PINOOX_DEV_APP'),
+        inspector_env_value('PINX_PACKAGE'),
+        inspector_env_value('PINOOX_CLI_PACKAGE'),
     ] as $candidate) {
-        $candidate = trim($candidate);
-
         if ($candidate === '') {
             continue;
         }
@@ -166,6 +362,12 @@ function inspector_default_package(string $platformRoot): ?string
         if ($resolved !== null) {
             return $resolved;
         }
+    }
+
+    $fromPincore = inspector_pincore_dev_package($platformRoot);
+
+    if ($fromPincore !== null && inspector_validate_package($platformRoot, $fromPincore) !== null) {
+        return $fromPincore;
     }
 
     foreach (inspector_list_apps($platformRoot) as $app) {
@@ -185,6 +387,12 @@ function inspector_resolve_package_alias(string $platformRoot, string $candidate
 
     if ($candidate === '') {
         return null;
+    }
+
+    $bindingPackage = inspector_parse_package_binding($candidate);
+
+    if ($bindingPackage !== null && inspector_validate_package($platformRoot, $bindingPackage) !== null) {
+        return $bindingPackage;
     }
 
     if (inspector_validate_package($platformRoot, $candidate) !== null) {
@@ -224,19 +432,92 @@ function inspector_validate_package(string $platformRoot, string $package): ?str
         return null;
     }
 
-    $manifest = normalize_path($platformRoot) . '/apps/' . $package . '/app.php';
+    $platformRoot = normalize_path($platformRoot);
+    $manifest = $platformRoot . '/apps/' . $package . '/app.php';
 
-    return is_file($manifest) ? $package : null;
+    if (is_file($manifest)) {
+        return $package;
+    }
+
+    if (is_file($platformRoot . '/app.php')) {
+        $config = app_config($platformRoot);
+
+        if ((string) ($config['package'] ?? '') === $package) {
+            return $package;
+        }
+    }
+
+    $enginePath = inspector_pincore_app_path($platformRoot, $package);
+
+    return $enginePath !== null ? $package : null;
+}
+
+function inspector_app_root_for_package(string $platformRoot, string $package): string
+{
+    $platformRoot = normalize_path($platformRoot);
+    $appsRoot = $platformRoot . '/apps/' . $package;
+
+    if (is_file($appsRoot . '/app.php')) {
+        return normalize_path($appsRoot);
+    }
+
+    if (is_file($platformRoot . '/app.php')) {
+        $config = app_config($platformRoot);
+
+        if ((string) ($config['package'] ?? '') === $package) {
+            return $platformRoot;
+        }
+    }
+
+    $enginePath = inspector_pincore_app_path($platformRoot, $package);
+
+    if ($enginePath !== null) {
+        return $enginePath;
+    }
+
+    return normalize_path($appsRoot);
+}
+
+function inspector_app_package(string $scopeRoot, ?string $platformRoot = null): ?string
+{
+    $scopeRoot = normalize_path($scopeRoot);
+    $platformRoot = normalize_path($platformRoot ?? inspector_platform_root_from_scope($scopeRoot));
+    $config = app_config($scopeRoot);
+    $package = trim((string) ($config['package'] ?? ''));
+
+    if ($package !== '') {
+        return $package;
+    }
+
+    if (basename(dirname($scopeRoot)) === 'apps') {
+        return basename($scopeRoot);
+    }
+
+    if (inspector_is_platform($platformRoot)) {
+        return inspector_active_package($platformRoot);
+    }
+
+    $folder = basename($scopeRoot);
+
+    return $folder !== '' ? $folder : null;
 }
 
 function inspector_active_package(string $platformRoot): ?string
 {
+    if (inspector_is_serve_locked($platformRoot)) {
+        return inspector_locked_package($platformRoot);
+    }
+
     return inspector_request_package($platformRoot) ?? inspector_default_package($platformRoot);
 }
 
 function inspector_scope_root(string $platformRoot): string
 {
     $platformRoot = normalize_path($platformRoot);
+
+    if (basename(dirname($platformRoot)) === 'apps' && is_file($platformRoot . '/app.php')) {
+        return $platformRoot;
+    }
 
     if (!inspector_is_platform($platformRoot)) {
         return $platformRoot;
@@ -248,7 +529,36 @@ function inspector_scope_root(string $platformRoot): string
         return $platformRoot;
     }
 
-    return $platformRoot . '/apps/' . $package;
+    return inspector_app_root_for_package($platformRoot, $package);
+}
+
+/**
+ * @return array{cli: list<string>, cwd: string, inject_package: bool}
+ */
+function inspector_resolve_cli(string $platformRoot, ?string $package = null): array
+{
+    $platformRoot = normalize_path($platformRoot);
+    $scopeRoot = inspector_scope_root($platformRoot);
+    $candidates = [
+        ['script' => $platformRoot . '/pinoox', 'cwd' => $platformRoot, 'inject_package' => true],
+        ['script' => $platformRoot . '/bin/pinx', 'cwd' => $platformRoot, 'inject_package' => false],
+        ['script' => $scopeRoot . '/bin/pinx', 'cwd' => $scopeRoot, 'inject_package' => false],
+        ['script' => $scopeRoot . '/pinoox', 'cwd' => $scopeRoot, 'inject_package' => true],
+    ];
+
+    foreach ($candidates as $candidate) {
+        if (!is_file($candidate['script'])) {
+            continue;
+        }
+
+        return [
+            'cli' => [PHP_BINARY, $candidate['script']],
+            'cwd' => $candidate['cwd'],
+            'inject_package' => $candidate['inject_package'] && basename($candidate['script']) === 'pinoox',
+        ];
+    }
+
+    throw new RuntimeException('Project CLI was not found (pinoox or bin/pinx).');
 }
 
 function inspector_logs_dir(string $scopeRoot): string
@@ -348,7 +658,7 @@ function inspector_scope_context(string $scopeRoot, ?string $platformRoot = null
         'app_root' => normalize_path($scopeRoot),
         'platform_root' => $platformRoot,
         'is_platform' => inspector_is_platform($platformRoot),
-        'package' => (string) ($config['package'] ?? basename($scopeRoot)),
+        'package' => (string) (inspector_app_package($scopeRoot, $platformRoot) ?? basename($scopeRoot)),
         'logs_dir' => inspector_logs_dir($scopeRoot),
         'env_file' => inspector_env_file_path($scopeRoot),
         'storage_dir' => inspector_storage_dir($scopeRoot),
@@ -360,14 +670,21 @@ function apps_payload(string $platformRoot): array
 {
     $platformRoot = normalize_path($platformRoot);
     $isPlatform = inspector_is_platform($platformRoot);
-    $active = $isPlatform ? inspector_active_package($platformRoot) : null;
-    $router = $isPlatform ? inspector_app_router_map($platformRoot) : [];
+    $locked = inspector_is_serve_locked($platformRoot);
+    $scopeRoot = inspector_scope_root($platformRoot);
+    $active = $locked
+        ? inspector_locked_package($platformRoot)
+        : ($isPlatform ? inspector_active_package($platformRoot) : inspector_app_package($scopeRoot, $platformRoot));
+    $items = inspector_visible_apps($platformRoot);
+    $router = $isPlatform && !$locked ? inspector_app_router_map($platformRoot) : [];
 
     return [
         'platform' => $isPlatform,
+        'locked' => $locked,
+        'selectable' => $isPlatform && !$locked && count($items) > 1,
         'active' => $active,
-        'default' => $isPlatform ? inspector_default_package($platformRoot) : null,
+        'default' => $active,
         'router' => $router,
-        'items' => $isPlatform ? inspector_list_apps($platformRoot) : [],
+        'items' => $items,
     ];
 }

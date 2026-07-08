@@ -500,6 +500,7 @@ function summary_payload(string $root, ?string $platformRoot = null): array
 {
     $platformRoot = normalize_path($platformRoot ?? inspector_platform_root_from_scope($root));
     $config = app_config($root);
+    $resolvedPackage = inspector_app_package($root, $platformRoot);
     $pincore = pincore_config($platformRoot);
     $tables = safe_tables_payload($root);
     $connection = connection_config($root)['connection'];
@@ -509,7 +510,7 @@ function summary_payload(string $root, ?string $platformRoot = null): array
 
     return [
         'app' => [
-            'package' => (string) ($config['package'] ?? 'unknown'),
+            'package' => (string) ($config['package'] ?? $resolvedPackage ?? 'unknown'),
             'name' => $displayName,
             'title' => inspector_app_title($root, $config, null, null, $platformRoot),
             'description' => inspector_app_description($root, $config, null, null, $platformRoot),
@@ -528,9 +529,14 @@ function summary_payload(string $root, ?string $platformRoot = null): array
         ],
         'platform' => [
             'enabled' => inspector_is_platform($platformRoot),
+            'locked' => inspector_is_serve_locked($platformRoot),
+            'selectable' => inspector_is_platform($platformRoot) && !inspector_is_serve_locked($platformRoot),
             'root' => $platformRoot,
-            'package' => inspector_is_platform($platformRoot) ? inspector_active_package($platformRoot) : null,
-            'apps' => inspector_is_platform($platformRoot) ? count(inspector_list_apps($platformRoot)) : 0,
+            'package' => inspector_is_serve_locked($platformRoot)
+                ? inspector_locked_package($platformRoot)
+                : (inspector_is_platform($platformRoot) ? ($resolvedPackage ?? inspector_active_package($platformRoot)) : $resolvedPackage),
+            'apps' => count(inspector_visible_apps($platformRoot)),
+            'serve_binding' => inspector_env_value('PINOOX_SERVE_APP'),
         ],
         'database' => [
             'connection' => $connection,
@@ -2187,7 +2193,7 @@ function cli_actions(): array
 function run_cli_action(string $root, string $action, array $extraArgs = []): array
 {
     $platformRoot = inspector_platform_root_from_scope($root);
-    $package = inspector_is_platform($platformRoot) ? inspector_active_package($platformRoot) : null;
+    $package = inspector_app_package($root, $platformRoot) ?? inspector_active_package($platformRoot);
 
     $commands = [
         'doctor' => ['doctor', '--json', '--no-ansi'],
@@ -2212,22 +2218,11 @@ function run_cli_action(string $root, string $action, array $extraArgs = []): ar
         throw new RuntimeException('Unknown Inspector action.');
     }
 
-    $cli = null;
-    $cwd = $platformRoot;
+    $resolved = inspector_resolve_cli($platformRoot, $package);
     $args = array_merge($commands[$action], $extraArgs);
+    $cmd = array_merge($resolved['cli'], $args);
 
-    if (is_file($platformRoot . '/pinoox')) {
-        $cli = [PHP_BINARY, $platformRoot . '/pinoox'];
-    } elseif (is_file($platformRoot . '/bin/pinx')) {
-        $cli = [PHP_BINARY, $platformRoot . '/bin/pinx'];
-    }
-
-    if ($cli === null) {
-        throw new RuntimeException('Project CLI was not found (pinoox or bin/pinx).');
-    }
-
-    $cmd = array_merge($cli, $args);
-    if ($package !== null && $package !== '' && basename((string) $cli[1]) === 'pinoox') {
+    if ($package !== null && $package !== '' && $resolved['inject_package']) {
         array_splice($cmd, 3, 0, [$package]);
     }
 
@@ -2236,7 +2231,7 @@ function run_cli_action(string $root, string $action, array $extraArgs = []): ar
         1 => ['pipe', 'w'],
         2 => ['pipe', 'w'],
     ];
-    $process = proc_open($cmd, $descriptor, $pipes, $cwd);
+    $process = proc_open($cmd, $descriptor, $pipes, $resolved['cwd']);
     if (!is_resource($process)) {
         throw new RuntimeException('Unable to start Pinx command.');
     }

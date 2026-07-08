@@ -1,9 +1,9 @@
-    const state = { selected: null, selectedRowKeys: [], limit: 50, offset: 0, search: '', tableFilter: '', view: 'dashboard', tables: [], database: null, selectedConnectionIndex: 0, connectionDetailTab: 'details', queryTable: '', queryColumns: [], querySelectedColumns: [], queryConditions: [], queryRows: [], queryBuilderMode: 'builder', queryPanelTab: 'results', queryLastPayload: null, queryLastExecutedAt: '', queryHistory: [], queryRawSql: '', queryRawResult: null, savedQueries: [], routes: null, routeSearch: '', routeGroup: 'all', selectedRoute: 0, selectedAction: 0, flow: null, flowSearch: '', flowTab: 'flow', flowType: 'all', flowStatus: 'all', flowGroup: 'web', selectedFlow: 0, migrations: null, migrationSearch: '', migrationStatus: 'all', selectedMigration: 0, migrationDetailTab: 'sql', migrationActionMenu: null, schedule: null, scheduleSearch: '', scheduleStatus: 'all', selectedSchedule: 0, logs: null, logSearch: '', logLevel: 'all', selectedLog: 0, logLive: false, themes: null, themeSearch: '', selectedTheme: 0, pinker: null, pinkerTab: 'overview', build: null, views: null, viewSearch: '', viewType: 'all', selectedView: 0, viewEditing: false, lang: null, langSearch: '', langScope: 'all', langLocale: 'all', langSyncReference: 'en', selectedLang: 0, langEditing: false, env: null, config: null, configSearch: '', configCategory: 'all', selectedConfig: 0, configEditing: false, busy: false, ready: false, loaded: {}, loading: {}, platform: false, activePackage: '', apps: [] };
+    const state = { selected: null, selectedRowKeys: [], limit: 50, offset: 0, search: '', tableFilter: '', view: 'dashboard', tables: [], database: null, selectedConnectionIndex: 0, connectionDetailTab: 'details', queryTable: '', queryColumns: [], querySelectedColumns: [], queryConditions: [], queryRows: [], queryBuilderMode: 'builder', queryPanelTab: 'results', queryLastPayload: null, queryLastExecutedAt: '', queryHistory: [], queryRawSql: '', queryRawResult: null, savedQueries: [], routes: null, routeSearch: '', routeGroup: 'all', selectedRoute: 0, selectedAction: 0, flow: null, flowSearch: '', flowTab: 'flow', flowType: 'all', flowStatus: 'all', flowGroup: 'web', selectedFlow: 0, migrations: null, migrationSearch: '', migrationStatus: 'all', selectedMigration: 0, migrationDetailTab: 'sql', migrationActionMenu: null, schedule: null, scheduleSearch: '', scheduleStatus: 'all', selectedSchedule: 0, logs: null, logSearch: '', logLevel: 'all', selectedLog: 0, logLive: false, themes: null, themeSearch: '', selectedTheme: 0, pinker: null, pinkerTab: 'overview', build: null, views: null, viewSearch: '', viewType: 'all', selectedView: 0, viewEditing: false, lang: null, langSearch: '', langScope: 'all', langLocale: 'all', langSyncReference: 'en', selectedLang: 0, langEditing: false, env: null, config: null, configSearch: '', configCategory: 'all', selectedConfig: 0, configEditing: false, busy: false, ready: false, loaded: {}, loading: {}, platform: false, locked: false, selectable: false, activePackage: '', apps: [] };
     const $ = (id) => document.getElementById(id);
     const base = location.pathname.startsWith('/~inspector') ? '/~inspector' : '';
     const packageStorageKey = 'pinx.inspector.package';
     const scopedUrl = (url) => {
-      if (!state.platform || !state.activePackage) return url;
+      if (state.locked || !state.platform || !state.activePackage || state.selectable === false) return url;
       const join = url.includes('?') ? '&' : '?';
       return url + join + 'package=' + encodeURIComponent(state.activePackage);
     };
@@ -277,14 +277,16 @@
     async function loadApps() {
       const payload = await api('/api/apps');
       state.platform = !!payload.platform;
+      state.locked = !!payload.locked;
+      state.selectable = payload.selectable === true;
       state.apps = Array.isArray(payload.items) ? payload.items : [];
-      const urlPackage = new URL(location.href).searchParams.get('package') || '';
-      const stored = localStorage.getItem(packageStorageKey) || '';
-      state.activePackage = urlPackage || stored || payload.active || payload.default || (state.apps[0] && state.apps[0].package) || '';
-      if (state.activePackage) localStorage.setItem(packageStorageKey, state.activePackage);
+      const urlPackage = state.locked ? '' : (new URL(location.href).searchParams.get('package') || '');
+      const stored = state.locked ? '' : (localStorage.getItem(packageStorageKey) || '');
+      state.activePackage = payload.active || payload.default || urlPackage || stored || (state.apps[0] && state.apps[0].package) || '';
+      if (state.activePackage && !state.locked) localStorage.setItem(packageStorageKey, state.activePackage);
       const wrap = $('appSelectorWrap');
       const select = $('appSelector');
-      if (!state.platform || !select || state.apps.length === 0) {
+      if (!state.selectable || !select || state.apps.length <= 1) {
         if (wrap) wrap.hidden = true;
         return;
       }
@@ -305,9 +307,11 @@
       showOperation('loading', 'Loading Inspector', 'Reading project summary.');
       if (!state.apps.length) await loadApps();
       const summary = await api('/api/summary');
-      if (summary.platform && summary.platform.enabled) {
-        state.platform = true;
-        state.activePackage = summary.platform.package || state.activePackage;
+      if (summary.platform) {
+        state.platform = !!summary.platform.enabled;
+        state.locked = !!summary.platform.locked;
+        state.selectable = summary.platform.selectable === true;
+        state.activePackage = summary.platform.package || summary.app.package || state.activePackage;
       }
       $('appName').textContent = summary.app.name;
       $('sideAppName').textContent = summary.app.name;
