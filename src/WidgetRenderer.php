@@ -11,7 +11,7 @@ final class WidgetRenderer
         $route = rtrim($route, '/');
         $route = htmlspecialchars($route !== '' ? $route : '/~inspector', ENT_QUOTES, 'UTF-8');
 
-        return <<<HTML
+        return self::minify(<<<HTML
 <script>
 (function () {
   if (window.__PINX_INSPECTOR_WIDGET__) return;
@@ -69,6 +69,13 @@ final class WidgetRenderer
   document.addEventListener('DOMContentLoaded', function () { document.body.appendChild(root); });
 })();
 </script>
-HTML;
+HTML);
+    }
+
+    private static function minify(string $html): string
+    {
+        $html = preg_replace('/>\s+</', '><', $html) ?? $html;
+
+        return preg_replace('/\s+/', ' ', trim($html)) ?? $html;
     }
 }
