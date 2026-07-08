@@ -6,6 +6,7 @@ require_once __DIR__ . '/platform-context.php';
 require_once __DIR__ . '/manifest-context.php';
 require_once __DIR__ . '/route-context.php';
 require_once __DIR__ . '/lang-context.php';
+require_once __DIR__ . '/health-context.php';
 
 $platformRoot = normalize_path((string) ($_SERVER['PINX_INSPECTOR_PROJECT_ROOT'] ?? getenv('PINX_INSPECTOR_PROJECT_ROOT') ?: getcwd()));
 $root = inspector_scope_root($platformRoot);
@@ -1970,7 +1971,7 @@ function quote_identifier(string $name): string
 function cli_actions(): array
 {
     return [
-        ['id' => 'doctor', 'label' => 'Doctor', 'description' => 'Run project health checks', 'command' => 'doctor --json'],
+        ['id' => 'doctor', 'label' => 'Doctor', 'description' => 'Run scoped app and platform health checks', 'command' => 'inspector:doctor'],
         ['id' => 'migrate_status', 'label' => 'Migrations', 'description' => 'Show migration status', 'command' => 'migrate:status'],
         ['id' => 'routes', 'label' => 'Routes', 'description' => 'List route actions', 'command' => 'route:actions'],
         ['id' => 'devdb_status', 'label' => 'DevDB Status', 'description' => 'Inspect DevDB runtime status', 'command' => 'devdb:status --json'],
@@ -1990,11 +1991,14 @@ function cli_actions(): array
 
 function run_cli_action(string $root, string $action): array
 {
+    if ($action === 'doctor') {
+        return inspector_doctor_result($root);
+    }
+
     $platformRoot = inspector_platform_root_from_scope($root);
     $package = inspector_is_platform($platformRoot) ? inspector_active_package($platformRoot) : null;
 
     $commands = [
-        'doctor' => ['doctor', '--json', '--no-ansi'],
         'migrate_status' => ['migrate:status', '--no-ansi'],
         'routes' => ['route:actions', '--no-ansi'],
         'devdb_status' => ['devdb:status', '--json', '--no-ansi'],
@@ -2083,7 +2087,7 @@ function command_payload(string $root, string $action): array
 
 function health_payload(string $root): array
 {
-    $result = run_cli_action($root, 'doctor');
+    $result = inspector_doctor_result($root);
     $json = is_array($result['json']) ? $result['json'] : [];
     $summary = is_array($json['summary'] ?? null) ? $json['summary'] : [];
     $checks = is_array($json['checks'] ?? null) ? $json['checks'] : [];
