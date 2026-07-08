@@ -2283,6 +2283,32 @@
       if (targetLocale) syncTarget.value = targetLocale;
     }
 
+    function openLangToolModal(mode) {
+      const modal = $('langToolsModal');
+      const copyPanel = $('langCopyPanel');
+      const syncPanel = $('langSyncPanel');
+      const title = $('langToolsModalTitle');
+      const subtitle = $('langToolsModalSubtitle');
+      if (!modal || !copyPanel || !syncPanel) return;
+      const isCopy = mode === 'copy';
+      copyPanel.classList.toggle('hidden', !isCopy);
+      syncPanel.classList.toggle('hidden', isCopy);
+      if (title) title.textContent = isCopy ? 'Copy locale' : 'Sync missing keys';
+      if (subtitle) subtitle.textContent = isCopy
+        ? 'Create a new locale by copying existing translation files.'
+        : 'Fill missing keys in a target locale from a reference locale.';
+      if (state.lang) renderLangLocaleControls(state.lang);
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+    }
+
+    function closeLangToolModal() {
+      const modal = $('langToolsModal');
+      if (!modal) return;
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+    }
+
     function renderLangLocaleTabs(payload) {
       const stats = payload.locale_stats || {};
       const locales = langLocaleOptions(payload);
@@ -2484,6 +2510,7 @@
         if (result.error) throw new Error(result.message || 'Locale copy failed.');
         showOperation('success', 'Locale copied', result.message || 'Language files were copied.');
         state.langLocale = target;
+        closeLangToolModal();
         await loadLang();
       } catch (error) {
         showOperation('danger', 'Copy locale failed', error.message || 'Unable to copy locale.');
@@ -2539,6 +2566,7 @@
         showOperation('success', 'Locale synced', result.message || 'Missing keys were added.');
         state.langLocale = target;
         state.langSyncReference = reference;
+        closeLangToolModal();
         await loadLang();
       } catch (error) {
         showOperation('danger', 'Locale sync failed', error.message || 'Unable to sync locale.');

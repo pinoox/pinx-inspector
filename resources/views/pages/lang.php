@@ -10,25 +10,11 @@
               <div class="ux-actions"><button onclick="loadLang()" class="ux-btn">Refresh</button></div>
             </div>
             <div id="langLocaleTabs" class="mb-3 flex flex-wrap gap-2"></div>
-            <div id="langScopeTabs" class="mb-4 flex flex-wrap gap-2"></div>
-            <div class="mb-4 grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-3 rounded-2xl border border-white/10 bg-black/20 p-4 max-xl:grid-cols-1">
-              <label class="text-xs text-slate-400">Copy from
-                <select id="langCopySource" class="ux-filter mt-2 w-full"></select>
-              </label>
-              <label class="text-xs text-slate-400">New locale
-                <input id="langCopyTarget" class="ux-filter mt-2 w-full" placeholder="ar">
-              </label>
-              <div class="flex items-end gap-2">
-                <button onclick="copyLangLocale()" class="ux-btn w-full">Copy locale</button>
-              </div>
-              <label class="text-xs text-slate-400">Sync reference
-                <select id="langSyncReference" class="ux-filter mt-2 w-full"></select>
-              </label>
-              <label class="text-xs text-slate-400">Target locale
-                <select id="langSyncTarget" class="ux-filter mt-2 w-full"></select>
-              </label>
-              <div class="flex items-end gap-2">
-                <button onclick="syncLangLocale()" class="ux-btn w-full">Sync missing keys</button>
+            <div class="mb-4 flex flex-wrap items-center justify-between gap-2">
+              <div id="langScopeTabs" class="flex flex-wrap gap-2"></div>
+              <div class="flex flex-wrap gap-2">
+                <button type="button" onclick="openLangToolModal('copy')" class="rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-bold text-slate-300 hover:bg-white/10">Copy locale</button>
+                <button type="button" onclick="openLangToolModal('sync')" class="rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-bold text-slate-300 hover:bg-white/10">Sync missing keys</button>
               </div>
             </div>
             <div class="ux-toolbar">

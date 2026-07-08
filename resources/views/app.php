@@ -30,6 +30,7 @@
   <?= inspector_view('components/operation-hud.php') ?>
   <?= inspector_view('components/detail-drawer.php') ?>
   <?= inspector_view('components/confirm-modal.php') ?>
+  <?= inspector_view('components/lang-tools-modal.php') ?>
   <?= inspector_view('components/progress-style.php') ?>
   <?= inspector_view('components/json-modal.php') ?>
   <script src="<?= $assetBase ?>/assets/inspector.js"></script>
