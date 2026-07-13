@@ -30,6 +30,11 @@ try {
         return;
     }
 
+    if ($path === '/apply-auth') {
+        html_response(inspector_apply_auth_html());
+        return;
+    }
+
     if ($path === '/assets/inspector.css') {
         asset_response(__DIR__ . '/assets/inspector.css', 'text/css; charset=utf-8');
         return;
@@ -5517,6 +5522,85 @@ function html_response(string $html): void
     header('Content-Type: text/html; charset=utf-8');
     header('Cache-Control: no-store');
     echo $html;
+}
+
+function inspector_apply_auth_html(): string
+{
+    return <<<'HTML'
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pinx Inspector Auth Bridge</title>
+</head>
+<body style="margin:0;font:14px/1.4 system-ui,sans-serif;background:#07101b;color:#e2e8f0;display:grid;place-items:center;min-height:100vh">
+  <div id="status" style="opacity:.8">Applying auth…</div>
+  <script>
+    (function () {
+      function applyAuth(payload) {
+        const token = String(payload?.token || '');
+        const key = String(payload?.auth_key || payload?.key || '');
+        const mode = String(payload?.auth_mode || payload?.mode || 'jwt').toLowerCase();
+        if (!token || !key) {
+          return { ok: false, message: 'Missing token or auth key.' };
+        }
+
+        const applied = [];
+        try {
+          if (mode === 'jwt' || mode === 'cookie') {
+            localStorage.setItem(key, token);
+            applied.push('localStorage');
+          }
+          if (mode === 'jwt' || mode === 'cookie') {
+            const maxAge = 60 * 60 * 24 * 30;
+            document.cookie = key + '=' + encodeURIComponent(token) + '; path=/; Max-Age=' + maxAge + '; SameSite=Lax';
+            applied.push('cookie');
+          }
+          return { ok: true, message: 'Applied: ' + applied.join(', '), applied: applied, key: key, mode: mode };
+        } catch (error) {
+          return { ok: false, message: error.message || 'Failed to apply auth.' };
+        }
+      }
+
+      function finish(result) {
+        const el = document.getElementById('status');
+        if (el) el.textContent = result.ok ? ('Auth applied (' + (result.applied || []).join(', ') + ').') : (result.message || 'Failed.');
+        if (window.opener && !window.opener.closed) {
+          try { window.opener.postMessage({ type: 'pinx-inspector-auth-applied', ...result }, '*'); } catch (e) {}
+        }
+        if (window.parent && window.parent !== window) {
+          try { window.parent.postMessage({ type: 'pinx-inspector-auth-applied', ...result }, '*'); } catch (e) {}
+        }
+        if (new URLSearchParams(location.search).get('close') === '1') {
+          setTimeout(function () { window.close(); }, 250);
+        }
+      }
+
+      window.addEventListener('message', function (event) {
+        const data = event.data;
+        if (!data || data.type !== 'pinx-inspector-apply-auth') return;
+        finish(applyAuth(data));
+      });
+
+      const hash = location.hash.startsWith('#') ? location.hash.slice(1) : '';
+      if (hash) {
+        const params = new URLSearchParams(hash);
+        const result = applyAuth({
+          token: params.get('token'),
+          auth_key: params.get('key') || params.get('auth_key'),
+          auth_mode: params.get('mode') || params.get('auth_mode'),
+        });
+        history.replaceState(null, '', location.pathname + location.search);
+        finish(result);
+      } else {
+        document.getElementById('status').textContent = 'Waiting for Inspector auth…';
+      }
+    })();
+  </script>
+</body>
+</html>
+HTML;
 }
 
 function asset_response(string $file, string $contentType): void

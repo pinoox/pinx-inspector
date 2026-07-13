@@ -2074,30 +2074,151 @@
       return `localStorage.setItem(${JSON.stringify(key)}, ${JSON.stringify(token)}); location.reload();`;
     }
 
+    function inspectorIsEmbeddedOnApp() {
+      return location.pathname.includes('/~inspector');
+    }
+
+    function inspectorAppAuthOrigins() {
+      const origins = new Set([location.origin]);
+      if (!inspectorIsEmbeddedOnApp()) {
+        origins.add('http://127.0.0.1:8000');
+        origins.add('http://localhost:8000');
+        origins.add('http://[::1]:8000');
+      }
+      return [...origins];
+    }
+
+    function applyAuthOnCurrentOrigin(login) {
+      const token = String(login?.token || '');
+      const key = String(login?.auth_key || '');
+      const mode = String(login?.auth_mode || 'jwt').toLowerCase();
+      if (!token || !key) {
+        return { ok: false, applied: [], message: 'Missing token or auth key.' };
+      }
+      if (mode === 'session') {
+        return { ok: false, applied: [], message: 'Session mode cannot be applied from Inspector automatically.' };
+      }
+
+      const applied = [];
+      try {
+        localStorage.setItem(key, token);
+        applied.push('localStorage');
+        const maxAge = 60 * 60 * 24 * 30;
+        document.cookie = `${key}=${encodeURIComponent(token)}; path=/; Max-Age=${maxAge}; SameSite=Lax`;
+        applied.push('cookie');
+        return { ok: true, applied, message: `Applied on ${location.origin}: ${applied.join(', ')}`, origin: location.origin, key, mode };
+      } catch (error) {
+        return { ok: false, applied, message: error.message || 'Failed to apply auth on this origin.' };
+      }
+    }
+
+    function applyAuthViaBridge(origin, login, timeoutMs = 2500) {
+      return new Promise((resolve) => {
+        const bridgePath = origin.replace(/\/$/, '') + '/~inspector/apply-auth';
+        let settled = false;
+        const iframe = document.createElement('iframe');
+        iframe.style.cssText = 'position:fixed;width:1px;height:1px;opacity:0;pointer-events:none;left:-100px;top:-100px;border:0';
+        iframe.setAttribute('aria-hidden', 'true');
+
+        const cleanup = () => {
+          window.removeEventListener('message', onMessage);
+          clearTimeout(timer);
+          iframe.remove();
+        };
+
+        const finish = (result) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          resolve(result);
+        };
+
+        const onMessage = (event) => {
+          if (event.origin !== origin) return;
+          const data = event.data;
+          if (!data || data.type !== 'pinx-inspector-auth-applied') return;
+          finish({
+            ok: !!data.ok,
+            applied: Array.isArray(data.applied) ? data.applied : [],
+            message: data.message || (data.ok ? `Applied on ${origin}` : `Failed on ${origin}`),
+            origin,
+          });
+        };
+
+        window.addEventListener('message', onMessage);
+        const timer = setTimeout(() => {
+          finish({ ok: false, applied: [], message: `Timed out applying auth on ${origin}`, origin });
+        }, timeoutMs);
+
+        iframe.addEventListener('load', () => {
+          try {
+            iframe.contentWindow.postMessage({
+              type: 'pinx-inspector-apply-auth',
+              token: login.token,
+              auth_key: login.auth_key,
+              auth_mode: login.auth_mode,
+            }, origin);
+          } catch (error) {
+            finish({ ok: false, applied: [], message: error.message || `Could not reach ${origin}`, origin });
+          }
+        });
+        iframe.addEventListener('error', () => {
+          finish({ ok: false, applied: [], message: `Could not load auth bridge on ${origin}`, origin });
+        });
+
+        iframe.src = bridgePath;
+        document.body.appendChild(iframe);
+      });
+    }
+
+    async function applyLoginToBrowsers(login) {
+      const results = [];
+      const local = applyAuthOnCurrentOrigin(login);
+      results.push(local);
+
+      if (!inspectorIsEmbeddedOnApp()) {
+        for (const origin of inspectorAppAuthOrigins()) {
+          if (origin === location.origin) continue;
+          results.push(await applyAuthViaBridge(origin, login));
+        }
+      }
+
+      const okResults = results.filter(result => result.ok);
+      return {
+        ok: okResults.length > 0,
+        results,
+        message: okResults.length
+          ? okResults.map(result => result.message).join(' · ')
+          : (results.map(result => result.message).filter(Boolean)[0] || 'Could not apply auth to the browser.'),
+      };
+    }
+
     function renderLoginTokenCard(login) {
       const mode = String(login.auth_mode || 'jwt').toLowerCase();
       const key = login.auth_key || '—';
-      const snippet = loginBrowserSnippet(login);
+      const applied = login.browser_applied;
       const help = mode === 'jwt'
-        ? `Paste in the app tab DevTools console (same origin). Stores JWT in localStorage under <code class="text-emerald-50">${esc(key)}</code>.`
+        ? `Inspector stores the JWT in localStorage + cookie under <code class="text-emerald-50">${esc(key)}</code> on the app origin.`
         : mode === 'cookie'
-          ? `Paste in the app tab DevTools console to set the <code class="text-emerald-50">${esc(key)}</code> cookie.`
+          ? `Inspector sets the <code class="text-emerald-50">${esc(key)}</code> cookie (and localStorage mirror) on the app origin.`
           : 'Session mode needs a normal browser login; CLI tokens are not attached to PHP sessions automatically.';
       return `
         <div class="rounded-3xl border border-emerald-300/20 bg-emerald-400/10 p-4 shadow-[0_18px_70px_rgba(0,0,0,.22)]">
-          <h3 class="font-bold text-emerald-100">Session token</h3>
+          <h3 class="font-bold text-emerald-100">Browser session</h3>
           <p class="mt-2 text-sm text-emerald-100/80">${esc(login.message || 'Login succeeded.')}</p>
           <div class="mt-3 flex flex-wrap gap-2 text-xs">
             <span class="rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-emerald-50">mode: ${esc(mode)}</span>
             <span class="rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-emerald-50">key: ${esc(key)}</span>
+            <span class="rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-emerald-50">${applied?.ok ? 'applied' : 'not applied'}</span>
           </div>
           <div class="mt-4 break-all rounded-2xl border border-white/10 bg-black/30 p-3 font-mono text-xs text-slate-200">${esc(login.token || '')}</div>
           <div class="mt-4 flex flex-wrap gap-2">
+            <button type="button" onclick="reapplyLoginToBrowser()" class="rounded-xl border border-emerald-300/30 bg-emerald-300/15 px-4 py-2 text-sm font-bold text-emerald-50 hover:bg-emerald-300/25">Apply to browser again</button>
             <button type="button" onclick="copyLoginToken()" class="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-bold text-slate-200 hover:bg-white/10">Copy token</button>
-            <button type="button" onclick="copyLoginSnippet()" class="rounded-xl border border-emerald-300/30 bg-emerald-300/15 px-4 py-2 text-sm font-bold text-emerald-50 hover:bg-emerald-300/25">Copy browser snippet</button>
+            <button type="button" onclick="copyLoginSnippet()" class="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-bold text-slate-200 hover:bg-white/10">Copy snippet</button>
           </div>
           <p class="mt-3 text-xs leading-relaxed text-emerald-100/75">${help}</p>
-          <pre class="mt-3 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-2xl border border-white/10 bg-black/30 p-3 font-mono text-[11px] text-slate-300">${esc(snippet)}</pre>
+          ${applied?.message ? `<p class="mt-2 text-xs text-emerald-50/90">${esc(applied.message)}</p>` : ''}
         </div>
       `;
     }
@@ -2122,6 +2243,19 @@
       showOperation('success', 'Snippet copied', 'Open the app origin DevTools console and paste, then Enter.');
     }
 
+    async function reapplyLoginToBrowser() {
+      if (!state.lastLogin?.token) {
+        showOperation('danger', 'Nothing to apply', 'Login first.');
+        return;
+      }
+      setBusy(true, 'Applying auth', 'Writing token into browser storage.');
+      const applied = await applyLoginToBrowsers(state.lastLogin);
+      state.lastLogin = { ...state.lastLogin, browser_applied: applied };
+      setBusy(false);
+      showOperation(applied.ok ? 'success' : 'danger', applied.ok ? 'Auth applied' : 'Apply failed', applied.message);
+      renderUsers();
+    }
+
     async function loginUser(userId) {
       if (!ensureReady()) return;
       const id = Number(userId) || 0;
@@ -2140,26 +2274,37 @@
       } catch (error) {
         payload = { ok: false, message: error.message || 'Login failed.' };
       }
-      setBusy(false);
       if (!payload.ok) {
+        setBusy(false);
         showOperation('danger', 'Login failed', payload.message || 'Could not authenticate this user.');
         box.className = 'mb-4 rounded-3xl border border-rose-300/20 bg-rose-400/10 p-4 text-rose-100';
         box.innerHTML = `<div class="font-bold">Login failed</div><div class="mt-1 text-sm opacity-80">${esc(payload.message || 'Could not authenticate this user.')}</div>`;
         return;
       }
+
+      setBusy(true, 'Applying auth', 'Writing token into browser localStorage and cookies.');
+      const applied = await applyLoginToBrowsers(payload);
+      payload.browser_applied = applied;
       state.lastLogin = payload;
-      showOperation('success', 'Logged in', payload.message || `User #${id} authenticated.`);
-      box.className = 'mb-4 rounded-3xl border border-emerald-300/20 bg-emerald-400/10 p-4 text-emerald-100';
+      setBusy(false);
+
+      showOperation(
+        applied.ok ? 'success' : 'warn',
+        applied.ok ? 'Logged in & applied' : 'Logged in (apply incomplete)',
+        applied.ok ? applied.message : `${payload.message || ''} ${applied.message}`.trim(),
+      );
+      box.className = `mb-4 rounded-3xl border p-4 ${applied.ok ? 'border-emerald-300/20 bg-emerald-400/10 text-emerald-100' : 'border-amber-300/20 bg-amber-400/10 text-amber-100'}`;
       box.innerHTML = `
         <div class="flex flex-wrap items-start justify-between gap-4">
           <div class="min-w-0 flex-1">
             <div class="font-bold">${esc(payload.message || 'Login succeeded')}</div>
             <div class="mt-1 text-xs opacity-80">mode: ${esc(payload.auth_mode || 'jwt')} · key: ${esc(payload.auth_key || '—')}</div>
-            <div class="mt-2 break-all font-mono text-xs opacity-90">${esc(payload.token || '')}</div>
+            <div class="mt-2 text-sm opacity-90">${esc(applied.message || '')}</div>
+            <div class="mt-2 break-all font-mono text-xs opacity-80">${esc(payload.token || '')}</div>
           </div>
           <div class="flex shrink-0 flex-col gap-2">
+            <button type="button" onclick="reapplyLoginToBrowser()" class="rounded-xl border border-emerald-300/30 bg-emerald-300/15 px-3 py-2 text-xs font-bold text-emerald-50 hover:bg-emerald-300/25">Apply again</button>
             <button type="button" onclick="copyLoginToken()" class="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs font-bold text-emerald-50 hover:bg-black/30">Copy token</button>
-            <button type="button" onclick="copyLoginSnippet()" class="rounded-xl border border-emerald-300/30 bg-emerald-300/15 px-3 py-2 text-xs font-bold text-emerald-50 hover:bg-emerald-300/25">Copy browser snippet</button>
           </div>
         </div>
       `;
