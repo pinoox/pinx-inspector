@@ -262,6 +262,17 @@ try {
         return;
     }
 
+    if ($path === '/api/users/logout') {
+        if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
+            json_response(['error' => true, 'message' => 'POST is required.'], 405);
+            return;
+        }
+
+        $payload = json_decode((string) file_get_contents('php://input'), true);
+        json_response(users_logout_payload($root, is_array($payload) ? $payload : []));
+        return;
+    }
+
     if ($path === '/api/views') {
         json_response(views_payload($root));
         return;
@@ -2287,6 +2298,7 @@ function run_cli_action(string $root, string $action, array $extraArgs = []): ar
         'migrate_rollback' => ['migrate:rollback', '--no-ansi'],
         'user_list' => ['user:list', '--json', '-n', '--no-ansi'],
         'user_login' => ['user:login', '--json', '-n', '--no-ansi'],
+        'user_logout' => ['user:logout', '--json', '-n', '--no-ansi'],
     ];
 
     if (!isset($commands[$action])) {
@@ -3418,12 +3430,66 @@ function users_login_payload(string $root, array $input): array
         'token' => (string) $decoded['token'],
         'auth_key' => (string) ($decoded['auth_key'] ?? ''),
         'auth_mode' => (string) ($decoded['auth_mode'] ?? 'jwt'),
+        'pinoox_login' => (string) ($decoded['pinoox_login'] ?? ''),
+        'dev_login' => (bool) ($decoded['dev_login'] ?? false),
         'browser_snippet' => users_browser_snippet(
             (string) $decoded['token'],
             (string) ($decoded['auth_key'] ?? ''),
             (string) ($decoded['auth_mode'] ?? 'jwt'),
         ),
-        'message' => sprintf('Logged in as #%s (%s).', (string) ($decoded['user_id'] ?? $userId), (string) ($decoded['username'] ?? 'user')),
+        'message' => sprintf(
+            'Logged in as #%s (%s). PINOOX_LOGIN=%s',
+            (string) ($decoded['user_id'] ?? $userId),
+            (string) ($decoded['username'] ?? 'user'),
+            (string) ($decoded['pinoox_login'] ?? '—'),
+        ),
+        'raw' => [
+            'stdout' => trim((string) ($result['stdout'] ?? '')),
+            'stderr' => trim((string) ($result['stderr'] ?? '')),
+            'exit_code' => (int) ($result['exit_code'] ?? 0),
+        ],
+    ];
+}
+
+/**
+ * @param array<string, mixed> $input
+ * @return array<string, mixed>
+ */
+function users_logout_payload(string $root, array $input): array
+{
+    $all = !empty($input['all']);
+    $extra = $all ? ['--all'] : [];
+    $result = run_cli_action($root, 'user_logout', $extra);
+    $decoded = users_decode_object((string) ($result['stdout'] ?? ''));
+    $ok = (bool) ($result['ok'] ?? false) && is_array($decoded) && !empty($decoded['ok']);
+
+    if (!$ok) {
+        $stderr = trim((string) ($result['stderr'] ?? ''));
+        $stdout = trim((string) ($result['stdout'] ?? ''));
+        $message = $stderr !== '' ? $stderr : ($stdout !== '' ? first_non_empty_line($stdout) : 'Logout failed.');
+
+        return [
+            'ok' => false,
+            'message' => $message,
+            'auth_key' => (string) ($input['auth_key'] ?? ''),
+            'raw' => [
+                'stdout' => $stdout,
+                'stderr' => $stderr,
+                'exit_code' => (int) ($result['exit_code'] ?? 1),
+            ],
+        ];
+    }
+
+    return [
+        'ok' => true,
+        'cleared_all' => (bool) ($decoded['cleared_all'] ?? $all),
+        'package' => $decoded['package'] ?? null,
+        'before' => $decoded['before'] ?? [],
+        'after' => $decoded['after'] ?? [],
+        'auth_key' => (string) ($input['auth_key'] ?? ''),
+        'message' => !empty($decoded['cleared_all']) || $all
+            ? 'Cleared all PINOOX_LOGIN entries.'
+            : sprintf('Cleared PINOOX_LOGIN for %s.', (string) ($decoded['package'] ?? 'app')),
         'raw' => [
             'stdout' => trim((string) ($result['stdout'] ?? '')),
             'stderr' => trim((string) ($result['stderr'] ?? '')),
@@ -5538,7 +5604,27 @@ function inspector_apply_auth_html(): string
   <div id="status" style="opacity:.8">Applying auth…</div>
   <script>
     (function () {
+      function clearAuth(payload) {
+        const key = String(payload?.auth_key || payload?.key || '');
+        if (!key) {
+          return { ok: false, message: 'Missing auth key.', applied: [] };
+        }
+        const applied = [];
+        try {
+          localStorage.removeItem(key);
+          applied.push('localStorage');
+          document.cookie = key + '=; path=/; Max-Age=0; SameSite=Lax';
+          applied.push('cookie');
+          return { ok: true, message: 'Cleared: ' + applied.join(', '), applied: applied, key: key, cleared: true };
+        } catch (error) {
+          return { ok: false, message: error.message || 'Failed to clear auth.', applied: applied };
+        }
+      }
+
       function applyAuth(payload) {
+        if (payload?.clear) {
+          return clearAuth(payload);
+        }
         const token = String(payload?.token || '');
         const key = String(payload?.auth_key || payload?.key || '');
         const mode = String(payload?.auth_mode || payload?.mode || 'jwt').toLowerCase();
@@ -5565,7 +5651,7 @@ function inspector_apply_auth_html(): string
 
       function finish(result) {
         const el = document.getElementById('status');
-        if (el) el.textContent = result.ok ? ('Auth applied (' + (result.applied || []).join(', ') + ').') : (result.message || 'Failed.');
+        if (el) el.textContent = result.ok ? ((result.cleared ? 'Auth cleared (' : 'Auth applied (') + (result.applied || []).join(', ') + ').') : (result.message || 'Failed.');
         if (window.opener && !window.opener.closed) {
           try { window.opener.postMessage({ type: 'pinx-inspector-auth-applied', ...result }, '*'); } catch (e) {}
         }
@@ -5579,14 +5665,15 @@ function inspector_apply_auth_html(): string
 
       window.addEventListener('message', function (event) {
         const data = event.data;
-        if (!data || data.type !== 'pinx-inspector-apply-auth') return;
-        finish(applyAuth(data));
+        if (!data || (data.type !== 'pinx-inspector-apply-auth' && data.type !== 'pinx-inspector-clear-auth')) return;
+        finish(applyAuth(data.type === 'pinx-inspector-clear-auth' ? { ...data, clear: true } : data));
       });
 
       const hash = location.hash.startsWith('#') ? location.hash.slice(1) : '';
       if (hash) {
         const params = new URLSearchParams(hash);
         const result = applyAuth({
+          clear: params.get('clear') === '1',
           token: params.get('token'),
           auth_key: params.get('key') || params.get('auth_key'),
           auth_mode: params.get('mode') || params.get('auth_mode'),
