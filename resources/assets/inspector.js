@@ -2056,8 +2056,70 @@
           </div>
           <button onclick="loginUser(${Number(user.user_id) || 0})" class="mt-4 w-full rounded-xl border border-emerald-300/20 bg-emerald-400/10 px-4 py-3 text-sm font-bold text-emerald-200 hover:bg-emerald-400/15" ${canLogin ? '' : 'disabled'}>${canLogin ? 'Login as this user' : 'Login unavailable'}</button>
         </div>
-        ${login ? `<div class="rounded-3xl border border-emerald-300/20 bg-emerald-400/10 p-4 shadow-[0_18px_70px_rgba(0,0,0,.22)]"><h3 class="font-bold text-emerald-100">Session token</h3><p class="mt-2 text-sm text-emerald-100/80">${esc(login.message || 'Login succeeded.')}</p><div class="mt-4 break-all rounded-2xl border border-white/10 bg-black/30 p-3 font-mono text-xs text-slate-200">${esc(login.token || '')}</div><button type="button" data-copy="${esc(login.token || '')}" class="copy-btn mt-4 rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-bold text-slate-200 hover:bg-white/10">Copy token</button></div>` : `<div class="rounded-3xl border border-white/10 bg-[#091320]/90 p-4 shadow-[0_18px_70px_rgba(0,0,0,.22)]"><h3 class="font-bold text-white">CLI login</h3><p class="mt-4 text-sm leading-relaxed text-slate-400">Uses <code class="text-sky-200">user:login --id=${esc(user.user_id)}</code> with the current app transport scope. The returned token works like an HTTP login response.</p></div>`}
+        ${login ? renderLoginTokenCard(login) : `<div class="rounded-3xl border border-white/10 bg-[#091320]/90 p-4 shadow-[0_18px_70px_rgba(0,0,0,.22)]"><h3 class="font-bold text-white">CLI login</h3><p class="mt-4 text-sm leading-relaxed text-slate-400">Uses <code class="text-sky-200">user:login --id=${esc(user.user_id)}</code> with the current app transport scope. For JWT apps, copy the localStorage snippet into the app origin console.</p></div>`}
       `;
+    }
+
+    function loginBrowserSnippet(login) {
+      if (login?.browser_snippet) return String(login.browser_snippet);
+      const key = login?.auth_key || 'pinoox_user';
+      const token = login?.token || '';
+      const mode = String(login?.auth_mode || 'jwt').toLowerCase();
+      if (mode === 'cookie') {
+        return `document.cookie = ${JSON.stringify(`${key}=${encodeURIComponent(token)}; path=/; SameSite=Lax`)}; location.reload();`;
+      }
+      if (mode === 'session') {
+        return '/* auth.mode=session — use the browser login UI */';
+      }
+      return `localStorage.setItem(${JSON.stringify(key)}, ${JSON.stringify(token)}); location.reload();`;
+    }
+
+    function renderLoginTokenCard(login) {
+      const mode = String(login.auth_mode || 'jwt').toLowerCase();
+      const key = login.auth_key || '—';
+      const snippet = loginBrowserSnippet(login);
+      const help = mode === 'jwt'
+        ? `Paste in the app tab DevTools console (same origin). Stores JWT in localStorage under <code class="text-emerald-50">${esc(key)}</code>.`
+        : mode === 'cookie'
+          ? `Paste in the app tab DevTools console to set the <code class="text-emerald-50">${esc(key)}</code> cookie.`
+          : 'Session mode needs a normal browser login; CLI tokens are not attached to PHP sessions automatically.';
+      return `
+        <div class="rounded-3xl border border-emerald-300/20 bg-emerald-400/10 p-4 shadow-[0_18px_70px_rgba(0,0,0,.22)]">
+          <h3 class="font-bold text-emerald-100">Session token</h3>
+          <p class="mt-2 text-sm text-emerald-100/80">${esc(login.message || 'Login succeeded.')}</p>
+          <div class="mt-3 flex flex-wrap gap-2 text-xs">
+            <span class="rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-emerald-50">mode: ${esc(mode)}</span>
+            <span class="rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-emerald-50">key: ${esc(key)}</span>
+          </div>
+          <div class="mt-4 break-all rounded-2xl border border-white/10 bg-black/30 p-3 font-mono text-xs text-slate-200">${esc(login.token || '')}</div>
+          <div class="mt-4 flex flex-wrap gap-2">
+            <button type="button" onclick="copyLoginToken()" class="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-bold text-slate-200 hover:bg-white/10">Copy token</button>
+            <button type="button" onclick="copyLoginSnippet()" class="rounded-xl border border-emerald-300/30 bg-emerald-300/15 px-4 py-2 text-sm font-bold text-emerald-50 hover:bg-emerald-300/25">Copy browser snippet</button>
+          </div>
+          <p class="mt-3 text-xs leading-relaxed text-emerald-100/75">${help}</p>
+          <pre class="mt-3 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-2xl border border-white/10 bg-black/30 p-3 font-mono text-[11px] text-slate-300">${esc(snippet)}</pre>
+        </div>
+      `;
+    }
+
+    async function copyLoginToken() {
+      const token = state.lastLogin?.token || '';
+      if (!token) {
+        showOperation('danger', 'Nothing to copy', 'Login first to get a token.');
+        return;
+      }
+      await copyText(token);
+      showOperation('success', 'Token copied', 'Paste into Authorization header or localStorage.');
+    }
+
+    async function copyLoginSnippet() {
+      const snippet = loginBrowserSnippet(state.lastLogin || {});
+      if (!snippet || snippet.startsWith('/*')) {
+        showOperation('danger', 'Snippet unavailable', 'Session auth mode needs a browser UI login.');
+        return;
+      }
+      await copyText(snippet);
+      showOperation('success', 'Snippet copied', 'Open the app origin DevTools console and paste, then Enter.');
     }
 
     async function loginUser(userId) {
@@ -2089,9 +2151,16 @@
       showOperation('success', 'Logged in', payload.message || `User #${id} authenticated.`);
       box.className = 'mb-4 rounded-3xl border border-emerald-300/20 bg-emerald-400/10 p-4 text-emerald-100';
       box.innerHTML = `
-        <div class="flex items-start justify-between gap-4 max-md:flex-col">
-          <div class="min-w-0"><div class="font-bold">${esc(payload.message || 'Login succeeded')}</div><div class="mt-2 break-all font-mono text-xs opacity-90">${esc(payload.token || '')}</div></div>
-          <button type="button" data-copy="${esc(payload.token || '')}" class="copy-btn shrink-0 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs font-bold text-emerald-50 hover:bg-black/30">Copy token</button>
+        <div class="flex flex-wrap items-start justify-between gap-4">
+          <div class="min-w-0 flex-1">
+            <div class="font-bold">${esc(payload.message || 'Login succeeded')}</div>
+            <div class="mt-1 text-xs opacity-80">mode: ${esc(payload.auth_mode || 'jwt')} · key: ${esc(payload.auth_key || '—')}</div>
+            <div class="mt-2 break-all font-mono text-xs opacity-90">${esc(payload.token || '')}</div>
+          </div>
+          <div class="flex shrink-0 flex-col gap-2">
+            <button type="button" onclick="copyLoginToken()" class="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs font-bold text-emerald-50 hover:bg-black/30">Copy token</button>
+            <button type="button" onclick="copyLoginSnippet()" class="rounded-xl border border-emerald-300/30 bg-emerald-300/15 px-3 py-2 text-xs font-bold text-emerald-50 hover:bg-emerald-300/25">Copy browser snippet</button>
+          </div>
         </div>
       `;
       renderUsers();

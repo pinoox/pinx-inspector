@@ -3411,6 +3411,13 @@ function users_login_payload(string $root, array $input): array
         'app' => $decoded['app'] ?? null,
         'context' => $decoded['context'] ?? null,
         'token' => (string) $decoded['token'],
+        'auth_key' => (string) ($decoded['auth_key'] ?? ''),
+        'auth_mode' => (string) ($decoded['auth_mode'] ?? 'jwt'),
+        'browser_snippet' => users_browser_snippet(
+            (string) $decoded['token'],
+            (string) ($decoded['auth_key'] ?? ''),
+            (string) ($decoded['auth_mode'] ?? 'jwt'),
+        ),
         'message' => sprintf('Logged in as #%s (%s).', (string) ($decoded['user_id'] ?? $userId), (string) ($decoded['username'] ?? 'user')),
         'raw' => [
             'stdout' => trim((string) ($result['stdout'] ?? '')),
@@ -3418,6 +3425,22 @@ function users_login_payload(string $root, array $input): array
             'exit_code' => (int) ($result['exit_code'] ?? 0),
         ],
     ];
+}
+
+function users_browser_snippet(string $token, string $authKey, string $authMode): string
+{
+    $key = $authKey !== '' ? $authKey : 'pinoox_user';
+    $mode = strtolower($authMode);
+
+    if ($mode === 'jwt') {
+        return 'localStorage.setItem(' . json_encode($key, JSON_UNESCAPED_SLASHES) . ', ' . json_encode($token, JSON_UNESCAPED_SLASHES) . '); location.reload();';
+    }
+
+    if ($mode === 'cookie') {
+        return 'document.cookie = ' . json_encode($key . '=' . rawurlencode($token) . '; path=/; SameSite=Lax', JSON_UNESCAPED_SLASHES) . '; location.reload();';
+    }
+
+    return '/* auth.mode=session — log in from the browser UI; CLI tokens are not applied to PHP sessions automatically */';
 }
 
 /**
