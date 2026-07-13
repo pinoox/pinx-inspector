@@ -1,4 +1,4 @@
-    const state = { selected: null, selectedRowKeys: [], limit: 50, offset: 0, search: '', tableFilter: '', view: 'dashboard', tables: [], database: null, selectedConnectionIndex: 0, connectionDetailTab: 'details', queryTable: '', queryColumns: [], querySelectedColumns: [], queryConditions: [], queryRows: [], queryBuilderMode: 'builder', queryPanelTab: 'results', queryLastPayload: null, queryLastExecutedAt: '', queryHistory: [], queryRawSql: '', queryRawResult: null, savedQueries: [], routes: null, routeSearch: '', routeGroup: 'all', selectedRoute: 0, selectedAction: 0, flow: null, flowSearch: '', flowTab: 'flow', flowType: 'all', flowStatus: 'all', flowGroup: 'web', selectedFlow: 0, migrations: null, migrationSearch: '', migrationStatus: 'all', selectedMigration: 0, migrationDetailTab: 'sql', migrationActionMenu: null, schedule: null, scheduleSearch: '', scheduleStatus: 'all', selectedSchedule: 0, logs: null, logSearch: '', logLevel: 'all', selectedLog: 0, logLive: false, themes: null, themeSearch: '', selectedTheme: 0, pinker: null, pinkerTab: 'overview', build: null, views: null, viewSearch: '', viewType: 'all', selectedView: 0, viewEditing: false, lang: null, langSearch: '', langScope: 'all', langLocale: 'all', langSyncReference: 'en', selectedLang: 0, langEditing: false, env: null, config: null, configSearch: '', configCategory: 'all', selectedConfig: 0, configEditing: false, busy: false, ready: false, loaded: {}, loading: {}, platform: false, locked: false, selectable: false, activePackage: '', apps: [] };
+    const state = { selected: null, selectedRowKeys: [], limit: 50, offset: 0, search: '', tableFilter: '', view: 'dashboard', tables: [], database: null, selectedConnectionIndex: 0, connectionDetailTab: 'details', queryTable: '', queryColumns: [], querySelectedColumns: [], queryConditions: [], queryRows: [], queryBuilderMode: 'builder', queryPanelTab: 'results', queryLastPayload: null, queryLastExecutedAt: '', queryHistory: [], queryRawSql: '', queryRawResult: null, savedQueries: [], routes: null, routeSearch: '', routeGroup: 'all', selectedRoute: 0, selectedAction: 0, flow: null, flowSearch: '', flowTab: 'flow', flowType: 'all', flowStatus: 'all', flowGroup: 'web', selectedFlow: 0, migrations: null, migrationSearch: '', migrationStatus: 'all', selectedMigration: 0, migrationDetailTab: 'sql', migrationActionMenu: null, schedule: null, scheduleSearch: '', scheduleStatus: 'all', selectedSchedule: 0, logs: null, logSearch: '', logLevel: 'all', selectedLog: 0, logLive: false, themes: null, themeSearch: '', selectedTheme: 0, users: null, userSearch: '', userStatus: 'all', selectedUser: 0, lastLogin: null, pinker: null, pinkerTab: 'overview', build: null, views: null, viewSearch: '', viewType: 'all', selectedView: 0, viewEditing: false, lang: null, langSearch: '', langScope: 'all', langLocale: 'all', langSyncReference: 'en', selectedLang: 0, langEditing: false, env: null, config: null, configSearch: '', configCategory: 'all', selectedConfig: 0, configEditing: false, busy: false, ready: false, loaded: {}, loading: {}, platform: false, locked: false, selectable: false, activePackage: '', apps: [] };
     const $ = (id) => document.getElementById(id);
     const base = location.pathname.startsWith('/~inspector') ? '/~inspector' : '';
     const packageStorageKey = 'pinx.inspector.package';
@@ -247,6 +247,9 @@
       } else if (view === 'themes') {
         setHtml('themesContent', loadingPanel('Loading themes', 'Reading installed app and theme metadata.'));
         setHtml('themeDetails', compactLoading('Loading theme details'));
+      } else if (view === 'users') {
+        setHtml('usersContent', loadingPanel('Loading users', 'Reading users from the active app transport scope.'));
+        setHtml('userDetails', compactLoading('Loading user details'));
       } else if (view === 'pinker') {
         setHtml('pinkerOverview', loadingPanel('Loading Pinker', 'Reading package, cache, and build metadata.'));
         setHtml('pinkerBuildStatus', compactLoading('Loading cache health'));
@@ -1981,6 +1984,120 @@
       `;
     }
 
+    async function loadUsers() {
+      state.users = await api('/api/users');
+      renderUsers();
+    }
+
+    function filteredUsers() {
+      const query = state.userSearch.trim().toLowerCase();
+      const status = state.userStatus || 'all';
+      return (state.users?.items || []).filter(user => {
+        if (status !== 'all' && String(user.status || '').toLowerCase() !== status) return false;
+        if (!query) return true;
+        return [user.user_id, user.username, user.email, user.full_name, user.group_key, user.app, user.status].join(' ').toLowerCase().includes(query);
+      });
+    }
+
+    function userStatusTone(status) {
+      const value = String(status || '').toLowerCase();
+      if (value === 'active') return 'text-emerald-300';
+      if (value === 'suspend') return 'text-rose-300';
+      if (value === 'pending') return 'text-amber-300';
+      return 'text-slate-400';
+    }
+
+    function renderUsers() {
+      const payload = state.users || { items: [], summary: {}, package: '' };
+      const users = filteredUsers();
+      if (state.selectedUser >= users.length) state.selectedUser = 0;
+      $('usersTotalBadge').textContent = Number(payload.summary?.total || 0).toLocaleString();
+      $('usersSummary').innerHTML = `
+        ${smallCard('Users', payload.summary?.total || 0, payload.package || 'current app', 'blue')}
+        ${smallCard('Active', payload.summary?.active || 0, 'ready to login', 'success')}
+        ${smallCard('Other', payload.summary?.inactive || 0, 'inactive / pending / suspend', 'warn')}
+      `;
+      $('usersContent').innerHTML = users.length ? `
+        <table class="w-full min-w-[980px] text-left text-sm">
+          <thead class="bg-white/[.04] text-xs uppercase tracking-wide text-slate-400"><tr><th class="px-4 py-4 font-semibold">User</th><th class="px-4 py-4 font-semibold">Email</th><th class="px-4 py-4 font-semibold">Status</th><th class="px-4 py-4 font-semibold">Group</th><th class="px-4 py-4 font-semibold">App</th><th class="px-4 py-4 font-semibold">Created</th><th class="px-4 py-4 font-semibold">Actions</th></tr></thead>
+          <tbody class="divide-y divide-white/10">${users.map((user, index) => `<tr onclick="selectUser(${index})" class="cursor-pointer transition hover:bg-white/[.05] ${index === state.selectedUser ? 'bg-sky-500/16' : ''}">
+            <td class="px-4 py-4"><div class="min-w-0"><div class="font-bold text-white">#${esc(user.user_id)} ${esc(user.username || '')}</div><div class="mt-1 truncate text-xs text-slate-400">${esc(user.full_name || '—')}</div></div></td>
+            <td class="px-4 py-4 text-slate-300">${esc(user.email || '—')}</td>
+            <td class="px-4 py-4"><span class="${userStatusTone(user.status)} font-bold">${esc(user.status || '—')}</span></td>
+            <td class="px-4 py-4 text-slate-300">${esc(user.group_key || '—')}</td>
+            <td class="px-4 py-4 text-slate-300">${esc(user.app || '—')}</td>
+            <td class="px-4 py-4 text-slate-300">${esc(user.created_at || '—')}</td>
+            <td class="px-4 py-4"><button onclick="event.stopPropagation(); loginUser(${Number(user.user_id) || 0})" class="rounded-xl border border-emerald-300/20 bg-emerald-400/10 px-3 py-1.5 text-xs font-bold text-emerald-200 hover:bg-emerald-400/15" ${String(user.status || '').toLowerCase() === 'active' ? '' : 'disabled'}>Login</button></td>
+          </tr>`).join('')}</tbody>
+        </table>
+        <div class="border-t border-white/10 px-4 py-4 text-sm text-slate-400">Showing ${users.length.toLocaleString()} of ${(payload.summary?.total || users.length).toLocaleString()} users</div>
+      ` : '<div class="grid min-h-[420px] place-items-center p-8 text-center text-slate-500"><div><div class="text-lg font-bold text-slate-300">No users found</div><div class="mt-2 text-sm">Try another search term or create a user with pinx user:create.</div></div></div>';
+      renderUserDetails(users[state.selectedUser] || null);
+    }
+
+    function selectUser(index) {
+      state.selectedUser = index;
+      renderUsers();
+      openDetailDrawerFrom('userDetails', 'User Details', 'Users');
+    }
+
+    function renderUserDetails(user) {
+      if (!user) {
+        $('userDetails').innerHTML = '<div class="rounded-3xl border border-dashed border-white/10 p-6 text-center text-slate-500">Select a user to inspect details or login.</div>';
+        return;
+      }
+      const canLogin = String(user.status || '').toLowerCase() === 'active';
+      const login = state.lastLogin && Number(state.lastLogin.user_id) === Number(user.user_id) ? state.lastLogin : null;
+      $('userDetails').innerHTML = `
+        <div class="rounded-3xl border border-white/10 bg-[#091320]/90 p-4 shadow-[0_18px_70px_rgba(0,0,0,.22)]">
+          <div class="mb-4 flex items-start justify-between gap-3"><div><h3 class="font-bold text-white">User Details</h3><div class="mt-1 text-sm text-slate-400">#${esc(user.user_id)} · ${esc(user.username || '')}</div></div><button onclick="renderUserDetails(null)" class="rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-sm font-bold text-slate-300 hover:bg-white/10">Close</button></div>
+          <div class="overflow-hidden rounded-2xl border border-white/10 bg-black/20">
+            ${configDetailRow('Username', user.username)}${configDetailRow('Email', user.email || '—')}${configDetailRow('Name', user.full_name || '—')}${configDetailRow('Status', user.status)}${configDetailRow('Group', user.group_key || '—')}${configDetailRow('App scope', user.app || '—')}${configDetailRow('Mobile', user.mobile || '—')}${configDetailRow('Created', user.created_at || '—')}
+          </div>
+          <button onclick="loginUser(${Number(user.user_id) || 0})" class="mt-4 w-full rounded-xl border border-emerald-300/20 bg-emerald-400/10 px-4 py-3 text-sm font-bold text-emerald-200 hover:bg-emerald-400/15" ${canLogin ? '' : 'disabled'}>${canLogin ? 'Login as this user' : 'Login unavailable'}</button>
+        </div>
+        ${login ? `<div class="rounded-3xl border border-emerald-300/20 bg-emerald-400/10 p-4 shadow-[0_18px_70px_rgba(0,0,0,.22)]"><h3 class="font-bold text-emerald-100">Session token</h3><p class="mt-2 text-sm text-emerald-100/80">${esc(login.message || 'Login succeeded.')}</p><div class="mt-4 break-all rounded-2xl border border-white/10 bg-black/30 p-3 font-mono text-xs text-slate-200">${esc(login.token || '')}</div><button type="button" data-copy="${esc(login.token || '')}" class="copy-btn mt-4 rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-bold text-slate-200 hover:bg-white/10">Copy token</button></div>` : `<div class="rounded-3xl border border-white/10 bg-[#091320]/90 p-4 shadow-[0_18px_70px_rgba(0,0,0,.22)]"><h3 class="font-bold text-white">CLI login</h3><p class="mt-4 text-sm leading-relaxed text-slate-400">Uses <code class="text-sky-200">user:login --id=${esc(user.user_id)}</code> with the current app transport scope. The returned token works like an HTTP login response.</p></div>`}
+      `;
+    }
+
+    async function loginUser(userId) {
+      if (!ensureReady()) return;
+      const id = Number(userId) || 0;
+      if (id <= 0) {
+        showOperation('danger', 'Login failed', 'A valid user id is required.');
+        return;
+      }
+      const box = $('usersActionResult');
+      box.classList.remove('hidden');
+      box.className = 'mb-4 rounded-3xl border border-sky-300/20 bg-sky-400/10 p-4 text-sky-100';
+      box.innerHTML = loadingActionCard('Logging in', `Issuing a session token for user #${id}.`);
+      setBusy(true, 'Logging in', `Issuing a session token for user #${id}.`);
+      let payload;
+      try {
+        payload = await post('/api/users/login', { id });
+      } catch (error) {
+        payload = { ok: false, message: error.message || 'Login failed.' };
+      }
+      setBusy(false);
+      if (!payload.ok) {
+        showOperation('danger', 'Login failed', payload.message || 'Could not authenticate this user.');
+        box.className = 'mb-4 rounded-3xl border border-rose-300/20 bg-rose-400/10 p-4 text-rose-100';
+        box.innerHTML = `<div class="font-bold">Login failed</div><div class="mt-1 text-sm opacity-80">${esc(payload.message || 'Could not authenticate this user.')}</div>`;
+        return;
+      }
+      state.lastLogin = payload;
+      showOperation('success', 'Logged in', payload.message || `User #${id} authenticated.`);
+      box.className = 'mb-4 rounded-3xl border border-emerald-300/20 bg-emerald-400/10 p-4 text-emerald-100';
+      box.innerHTML = `
+        <div class="flex items-start justify-between gap-4 max-md:flex-col">
+          <div class="min-w-0"><div class="font-bold">${esc(payload.message || 'Login succeeded')}</div><div class="mt-2 break-all font-mono text-xs opacity-90">${esc(payload.token || '')}</div></div>
+          <button type="button" data-copy="${esc(payload.token || '')}" class="copy-btn shrink-0 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-xs font-bold text-emerald-50 hover:bg-black/30">Copy token</button>
+        </div>
+      `;
+      renderUsers();
+      openDetailDrawerFrom('userDetails', 'User Details', 'Users');
+    }
+
     function sectionErrorPanel(title, message) {
       return `<div class="rounded-2xl border border-rose-300/20 bg-rose-400/10 p-5 text-rose-100"><div class="font-bold">${esc(title)}</div><div class="mt-1 text-sm opacity-80">${esc(message)}</div><button onclick="state.loaded.pinker=false; loadViewData('pinker', true)" class="mt-4 rounded-xl bg-rose-200 px-4 py-2 text-sm font-bold text-rose-950">Retry</button></div>`;
     }
@@ -3459,6 +3576,8 @@
           await loadLogs();
         } else if (view === 'themes') {
           await loadThemes();
+        } else if (view === 'users') {
+          await loadUsers();
         } else if (view === 'pinker') {
           await loadPinker();
         } else if (view === 'build') {
@@ -3570,6 +3689,8 @@
     $('scheduleSearch').oninput = (event) => { state.scheduleSearch = event.target.value || ''; state.selectedSchedule = 0; renderSchedule(); };
     $('scheduleStatusFilter').onchange = (event) => { state.scheduleStatus = event.target.value || 'all'; state.selectedSchedule = 0; renderSchedule(); };
     $('themeSearch').oninput = (event) => { state.themeSearch = event.target.value || ''; state.selectedTheme = 0; renderThemes(); };
+    $('userSearch').oninput = (event) => { state.userSearch = event.target.value || ''; state.selectedUser = 0; renderUsers(); };
+    $('userStatusFilter').onchange = (event) => { state.userStatus = event.target.value || 'all'; state.selectedUser = 0; renderUsers(); };
     $('viewSearch').oninput = (event) => { state.viewSearch = event.target.value || ''; state.selectedView = 0; renderViews(); };
     $('langSearch').oninput = (event) => { state.langSearch = event.target.value || ''; state.selectedLang = 0; state.langEditing = false; renderLang(); };
     $('langSyncReference')?.addEventListener('change', (event) => { state.langSyncReference = event.target.value || 'en'; });
@@ -3578,7 +3699,7 @@
     loadApps().then(() => boot()).then(() => {
       setReady(true);
       const initial = (location.hash || '#dashboard').slice(1);
-      switchView(['dashboard', 'connections', 'database', 'query', 'health', 'migrations', 'routes', 'flow', 'schedule', 'logs', 'themes', 'pinker', 'build', 'views', 'lang', 'env', 'config', 'export'].includes(initial) ? initial : 'dashboard');
+      switchView(['dashboard', 'connections', 'database', 'query', 'health', 'migrations', 'routes', 'users', 'flow', 'schedule', 'logs', 'themes', 'pinker', 'build', 'views', 'lang', 'env', 'config', 'export'].includes(initial) ? initial : 'dashboard');
     }).catch(error => {
       showOperation('danger', 'Inspector could not load', error.message || 'The initial project scan failed.');
       const lock = $('bootLock');

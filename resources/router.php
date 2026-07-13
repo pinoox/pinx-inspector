@@ -241,6 +241,22 @@ try {
         return;
     }
 
+    if ($path === '/api/users') {
+        json_response(users_payload($root));
+        return;
+    }
+
+    if ($path === '/api/users/login') {
+        if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
+            json_response(['error' => true, 'message' => 'POST is required.'], 405);
+            return;
+        }
+
+        $payload = json_decode((string) file_get_contents('php://input'), true);
+        json_response(users_login_payload($root, is_array($payload) ? $payload : []));
+        return;
+    }
+
     if ($path === '/api/views') {
         json_response(views_payload($root));
         return;
@@ -2264,6 +2280,8 @@ function run_cli_action(string $root, string $action, array $extraArgs = []): ar
         'deps_status' => ['deps:status', '--no-ansi'],
         'migrate' => ['migrate', '--platform', '--no-ansi'],
         'migrate_rollback' => ['migrate:rollback', '--no-ansi'],
+        'user_list' => ['user:list', '--json', '-n', '--no-ansi'],
+        'user_login' => ['user:login', '--json', '-n', '--no-ansi'],
     ];
 
     if (!isset($commands[$action])) {
@@ -3315,6 +3333,142 @@ function config_payload(string $root, bool $withUsage = true): array
             'overrides' => count(config_env_payload($env)),
         ],
     ];
+}
+
+function users_payload(string $root): array
+{
+    $platformRoot = inspector_platform_root_from_scope($root);
+    $package = inspector_app_package($root, $platformRoot) ?? inspector_active_package($platformRoot) ?? basename($root);
+    $result = run_cli_action($root, 'user_list');
+    $items = users_decode_list((string) ($result['stdout'] ?? ''));
+
+    if (!(bool) ($result['ok'] ?? false) && $items === []) {
+        $stderr = trim((string) ($result['stderr'] ?? ''));
+        $stdout = trim((string) ($result['stdout'] ?? ''));
+        throw new RuntimeException($stderr !== '' ? $stderr : ($stdout !== '' ? $stdout : 'Unable to list users.'));
+    }
+
+    $active = 0;
+    $inactive = 0;
+    foreach ($items as $user) {
+        $status = strtolower((string) ($user['status'] ?? ''));
+        if ($status === 'active') {
+            $active++;
+        } else {
+            $inactive++;
+        }
+    }
+
+    return [
+        'package' => (string) $package,
+        'summary' => [
+            'total' => count($items),
+            'active' => $active,
+            'inactive' => $inactive,
+        ],
+        'items' => $items,
+    ];
+}
+
+/**
+ * @param array<string, mixed> $input
+ * @return array<string, mixed>
+ */
+function users_login_payload(string $root, array $input): array
+{
+    $userId = (int) ($input['id'] ?? 0);
+    if ($userId <= 0) {
+        throw new RuntimeException('A positive user id is required.');
+    }
+
+    $result = run_cli_action($root, 'user_login', ['--id=' . $userId]);
+    $decoded = users_decode_object((string) ($result['stdout'] ?? ''));
+    $ok = (bool) ($result['ok'] ?? false) && is_array($decoded) && !empty($decoded['token']);
+
+    if (!$ok) {
+        $stderr = trim((string) ($result['stderr'] ?? ''));
+        $stdout = trim((string) ($result['stdout'] ?? ''));
+        $message = $stderr !== '' ? $stderr : ($stdout !== '' ? first_non_empty_line($stdout) : 'Login failed.');
+
+        return [
+            'ok' => false,
+            'message' => $message,
+            'user_id' => $userId,
+            'token' => null,
+            'raw' => [
+                'stdout' => $stdout,
+                'stderr' => $stderr,
+                'exit_code' => (int) ($result['exit_code'] ?? 1),
+            ],
+        ];
+    }
+
+    return [
+        'ok' => true,
+        'user_id' => $decoded['user_id'] ?? $userId,
+        'username' => $decoded['username'] ?? null,
+        'email' => $decoded['email'] ?? null,
+        'app' => $decoded['app'] ?? null,
+        'context' => $decoded['context'] ?? null,
+        'token' => (string) $decoded['token'],
+        'message' => sprintf('Logged in as #%s (%s).', (string) ($decoded['user_id'] ?? $userId), (string) ($decoded['username'] ?? 'user')),
+        'raw' => [
+            'stdout' => trim((string) ($result['stdout'] ?? '')),
+            'stderr' => trim((string) ($result['stderr'] ?? '')),
+            'exit_code' => (int) ($result['exit_code'] ?? 0),
+        ],
+    ];
+}
+
+/**
+ * @return list<array<string, mixed>>
+ */
+function users_decode_list(string $stdout): array
+{
+    $trimmed = trim($stdout);
+    if ($trimmed === '') {
+        return [];
+    }
+
+    $start = strpos($trimmed, '[');
+    if ($start === false) {
+        return [];
+    }
+
+    $json = substr($trimmed, $start);
+    $decoded = json_decode($json, true);
+    if (!is_array($decoded)) {
+        return [];
+    }
+
+    $items = [];
+    foreach ($decoded as $row) {
+        if (is_array($row)) {
+            $items[] = $row;
+        }
+    }
+
+    return $items;
+}
+
+/**
+ * @return array<string, mixed>|null
+ */
+function users_decode_object(string $stdout): ?array
+{
+    $trimmed = trim($stdout);
+    if ($trimmed === '') {
+        return null;
+    }
+
+    $start = strpos($trimmed, '{');
+    if ($start === false) {
+        return null;
+    }
+
+    $decoded = json_decode(substr($trimmed, $start), true);
+
+    return is_array($decoded) ? $decoded : null;
 }
 
 function themes_payload(string $root): array

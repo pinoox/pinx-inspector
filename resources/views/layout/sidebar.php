@@ -35,6 +35,7 @@
         <div class="space-y-1">
           <div class="px-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Application</div>
           <button data-view="routes" class="nav-btn w-full rounded-xl px-3 py-2 text-left text-sm font-medium text-slate-300 hover:bg-white/10">Routes</button>
+          <button data-view="users" class="nav-btn w-full rounded-xl px-3 py-2 text-left text-sm font-medium text-slate-300 hover:bg-white/10">Users</button>
           <button data-view="views" class="nav-btn w-full rounded-xl px-3 py-2 text-left text-sm font-medium text-slate-300 hover:bg-white/10">Views</button>
           <button data-view="lang" class="nav-btn w-full rounded-xl px-3 py-2 text-left text-sm font-medium text-slate-300 hover:bg-white/10">Lang</button>
           <button data-view="flow" class="nav-btn w-full rounded-xl px-3 py-2 text-left text-sm font-medium text-slate-300 hover:bg-white/10">Flow</button>
