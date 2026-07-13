@@ -3430,19 +3430,12 @@ function users_login_payload(string $root, array $input): array
         'token' => (string) $decoded['token'],
         'auth_key' => (string) ($decoded['auth_key'] ?? ''),
         'auth_mode' => (string) ($decoded['auth_mode'] ?? 'jwt'),
-        'pinoox_login' => (string) ($decoded['pinoox_login'] ?? ''),
-        'dev_login' => (bool) ($decoded['dev_login'] ?? false),
         'browser_snippet' => users_browser_snippet(
             (string) $decoded['token'],
             (string) ($decoded['auth_key'] ?? ''),
             (string) ($decoded['auth_mode'] ?? 'jwt'),
         ),
-        'message' => sprintf(
-            'Logged in as #%s (%s). PINOOX_LOGIN=%s',
-            (string) ($decoded['user_id'] ?? $userId),
-            (string) ($decoded['username'] ?? 'user'),
-            (string) ($decoded['pinoox_login'] ?? '—'),
-        ),
+        'message' => sprintf('Logged in as #%s (%s).', (string) ($decoded['user_id'] ?? $userId), (string) ($decoded['username'] ?? 'user')),
         'raw' => [
             'stdout' => trim((string) ($result['stdout'] ?? '')),
             'stderr' => trim((string) ($result['stderr'] ?? '')),
@@ -3457,9 +3450,7 @@ function users_login_payload(string $root, array $input): array
  */
 function users_logout_payload(string $root, array $input): array
 {
-    $all = !empty($input['all']);
-    $extra = $all ? ['--all'] : [];
-    $result = run_cli_action($root, 'user_logout', $extra);
+    $result = run_cli_action($root, 'user_logout', []);
     $decoded = users_decode_object((string) ($result['stdout'] ?? ''));
     $ok = (bool) ($result['ok'] ?? false) && is_array($decoded) && !empty($decoded['ok']);
 
@@ -3482,14 +3473,10 @@ function users_logout_payload(string $root, array $input): array
 
     return [
         'ok' => true,
-        'cleared_all' => (bool) ($decoded['cleared_all'] ?? $all),
         'package' => $decoded['package'] ?? null,
-        'before' => $decoded['before'] ?? [],
-        'after' => $decoded['after'] ?? [],
+        'was_logged_in' => (bool) ($decoded['was_logged_in'] ?? false),
         'auth_key' => (string) ($input['auth_key'] ?? ''),
-        'message' => !empty($decoded['cleared_all']) || $all
-            ? 'Cleared all PINOOX_LOGIN entries.'
-            : sprintf('Cleared PINOOX_LOGIN for %s.', (string) ($decoded['package'] ?? 'app')),
+        'message' => 'Logged out auth session.',
         'raw' => [
             'stdout' => trim((string) ($result['stdout'] ?? '')),
             'stderr' => trim((string) ($result['stderr'] ?? '')),

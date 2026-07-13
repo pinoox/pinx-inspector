@@ -2056,7 +2056,7 @@
           </div>
           <button onclick="loginUser(${Number(user.user_id) || 0})" class="mt-4 w-full rounded-xl border border-emerald-300/20 bg-emerald-400/10 px-4 py-3 text-sm font-bold text-emerald-200 hover:bg-emerald-400/15" ${canLogin ? '' : 'disabled'}>${canLogin ? 'Login as this user' : 'Login unavailable'}</button>
         </div>
-        ${login ? renderLoginTokenCard(login) : `<div class="rounded-3xl border border-white/10 bg-[#091320]/90 p-4 shadow-[0_18px_70px_rgba(0,0,0,.22)]"><h3 class="font-bold text-white">CLI login</h3><p class="mt-4 text-sm leading-relaxed text-slate-400">Uses <code class="text-sky-200">user:login --id=${esc(user.user_id)}</code>. Sets <code class="text-sky-200">PINOOX_LOGIN</code> in .env and applies the token to the browser.</p></div>`}
+        ${login ? renderLoginTokenCard(login) : `<div class="rounded-3xl border border-white/10 bg-[#091320]/90 p-4 shadow-[0_18px_70px_rgba(0,0,0,.22)]"><h3 class="font-bold text-white">CLI login</h3><p class="mt-4 text-sm leading-relaxed text-slate-400">Uses <code class="text-sky-200">user:login --id=${esc(user.user_id)}</code> and applies the token to browser localStorage/cookie for this app (no .env change).</p></div>`}
       `;
     }
 
@@ -2173,12 +2173,13 @@
 
     async function applyLoginToBrowsers(login) {
       const results = [];
-      const local = applyAuthOnCurrentOrigin(login);
-      results.push(local);
 
-      if (!inspectorIsEmbeddedOnApp()) {
+      // Dedicated Inspector port must use the app-origin bridge; localStorage on the
+      // Inspector origin is useless for manager/SPA auth.
+      if (inspectorIsEmbeddedOnApp()) {
+        results.push(applyAuthOnCurrentOrigin(login));
+      } else {
         for (const origin of inspectorAppAuthOrigins()) {
-          if (origin === location.origin) continue;
           results.push(await applyAuthViaBridge(origin, login));
         }
       }
@@ -2270,11 +2271,11 @@
 
     async function clearLoginFromBrowsers(login) {
       const results = [];
-      results.push(clearAuthOnCurrentOrigin(login));
 
-      if (!inspectorIsEmbeddedOnApp()) {
+      if (inspectorIsEmbeddedOnApp()) {
+        results.push(clearAuthOnCurrentOrigin(login));
+      } else {
         for (const origin of inspectorAppAuthOrigins()) {
-          if (origin === location.origin) continue;
           results.push(await clearAuthViaBridge(origin, login));
         }
       }
@@ -2293,12 +2294,11 @@
       const mode = String(login.auth_mode || 'jwt').toLowerCase();
       const key = login.auth_key || '—';
       const applied = login.browser_applied;
-      const envLogin = login.pinoox_login || '';
       const help = mode === 'jwt'
-        ? `Sets <code class="text-emerald-50">PINOOX_LOGIN</code> for server auto-login and stores the token in localStorage + cookie under <code class="text-emerald-50">${esc(key)}</code>.`
+        ? `Stores the JWT in localStorage + cookie under <code class="text-emerald-50">${esc(key)}</code> on the app origin.`
         : mode === 'cookie'
-          ? `Sets <code class="text-emerald-50">PINOOX_LOGIN</code> and the <code class="text-emerald-50">${esc(key)}</code> cookie (plus localStorage mirror).`
-          : 'Session mode needs a normal browser login; PINOOX_LOGIN still applies server-side.';
+          ? `Sets the <code class="text-emerald-50">${esc(key)}</code> cookie (and localStorage mirror) on the app origin.`
+          : 'Session mode needs a normal browser login; CLI tokens are not attached to PHP sessions automatically.';
       return `
         <div class="rounded-3xl border border-emerald-300/20 bg-emerald-400/10 p-4 shadow-[0_18px_70px_rgba(0,0,0,.22)]">
           <h3 class="font-bold text-emerald-100">Browser session</h3>
@@ -2308,7 +2308,6 @@
             <span class="rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-emerald-50">key: ${esc(key)}</span>
             <span class="rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-emerald-50">${applied?.ok ? 'applied' : 'not applied'}</span>
           </div>
-          ${envLogin ? `<div class="mt-3 break-all rounded-2xl border border-white/10 bg-black/30 p-3 font-mono text-xs text-sky-100">PINOOX_LOGIN=${esc(envLogin)}</div>` : ''}
           <div class="mt-3 break-all rounded-2xl border border-white/10 bg-black/30 p-3 font-mono text-xs text-slate-200">${esc(login.token || '')}</div>
           <div class="mt-4 flex flex-wrap gap-2">
             <button type="button" onclick="reapplyLoginToBrowser()" class="rounded-xl border border-emerald-300/30 bg-emerald-300/15 px-4 py-2 text-sm font-bold text-emerald-50 hover:bg-emerald-300/25">Apply to browser again</button>
@@ -2397,7 +2396,7 @@
         <div class="flex flex-wrap items-start justify-between gap-4">
           <div class="min-w-0 flex-1">
             <div class="font-bold">${esc(payload.message || 'Login succeeded')}</div>
-            <div class="mt-1 text-xs opacity-80">mode: ${esc(payload.auth_mode || 'jwt')} · key: ${esc(payload.auth_key || '—')}${payload.pinoox_login ? ` · PINOOX_LOGIN=${esc(payload.pinoox_login)}` : ''}</div>
+            <div class="mt-1 text-xs opacity-80">mode: ${esc(payload.auth_mode || 'jwt')} · key: ${esc(payload.auth_key || '—')}</div>
             <div class="mt-2 text-sm opacity-90">${esc(applied.message || '')}</div>
             <div class="mt-2 break-all font-mono text-xs opacity-80">${esc(payload.token || '')}</div>
           </div>
@@ -2418,8 +2417,8 @@
       const box = $('usersActionResult');
       box.classList.remove('hidden');
       box.className = 'mb-4 rounded-3xl border border-sky-300/20 bg-sky-400/10 p-4 text-sky-100';
-      box.innerHTML = loadingActionCard('Logging out', 'Clearing PINOOX_LOGIN and browser auth.');
-      setBusy(true, 'Logging out', 'Clearing PINOOX_LOGIN and browser auth.');
+      box.innerHTML = loadingActionCard('Logging out', 'Clearing browser auth session.');
+      setBusy(true, 'Logging out', 'Clearing browser auth session.');
 
       let payload;
       try {
@@ -2440,7 +2439,7 @@
       setBusy(false);
 
       if (!payload.ok) {
-        showOperation('danger', 'Logout failed', payload.message || 'Could not clear PINOOX_LOGIN.');
+        showOperation('danger', 'Logout failed', payload.message || 'Could not log out.');
         box.className = 'mb-4 rounded-3xl border border-rose-300/20 bg-rose-400/10 p-4 text-rose-100';
         box.innerHTML = `<div class="font-bold">Logout failed</div><div class="mt-1 text-sm opacity-80">${esc(payload.message || '')}</div>`;
         return;
@@ -2449,7 +2448,7 @@
       state.lastLogin = null;
       showOperation(
         cleared.ok ? 'success' : 'warn',
-        cleared.ok ? 'Logged out' : 'Logged out (.env cleared)',
+        cleared.ok ? 'Logged out' : 'Logged out (browser clear incomplete)',
         cleared.ok ? `${payload.message} ${cleared.message}`.trim() : `${payload.message} ${cleared.message}`.trim(),
       );
       box.className = `mb-4 rounded-3xl border p-4 ${cleared.ok ? 'border-emerald-300/20 bg-emerald-400/10 text-emerald-100' : 'border-amber-300/20 bg-amber-400/10 text-amber-100'}`;
