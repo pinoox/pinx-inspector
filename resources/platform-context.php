@@ -2,6 +2,72 @@
 
 declare(strict_types=1);
 
+/**
+ * Loopback always allowed. Private LAN remotes allowed by default (for `pinx dev -N`).
+ * Set PINX_INSPECTOR_ALLOW_LAN=0 to force loopback-only.
+ */
+function inspector_client_allowed(?string $remoteAddress = null): bool
+{
+    $ip = trim((string) ($remoteAddress ?? ($_SERVER['REMOTE_ADDR'] ?? '127.0.0.1')));
+
+    if ($ip === '' || $ip === '::1' || str_starts_with($ip, '127.')) {
+        return true;
+    }
+
+    if (str_starts_with(strtolower($ip), '::ffff:')) {
+        $ip = substr($ip, 7);
+    }
+
+    if (inspector_force_local_only()) {
+        return false;
+    }
+
+    return inspector_is_private_ip($ip);
+}
+
+function inspector_force_local_only(): bool
+{
+    $raw = getenv('PINX_INSPECTOR_ALLOW_LAN');
+
+    if ($raw === false || $raw === '') {
+        $raw = $_SERVER['PINX_INSPECTOR_ALLOW_LAN'] ?? $_ENV['PINX_INSPECTOR_ALLOW_LAN'] ?? null;
+    }
+
+    if ($raw === null || $raw === '') {
+        return false;
+    }
+
+    return in_array(strtolower(trim((string) $raw)), ['0', 'false', 'no', 'off'], true);
+}
+
+function inspector_is_private_ip(string $ip): bool
+{
+    if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+        // Private / reserved ranges validate as false when NO_PRIV_RANGE | NO_RES_RANGE are set.
+        return filter_var(
+            $ip,
+            FILTER_VALIDATE_IP,
+            FILTER_FLAG_IPV4 | FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE,
+        ) === false;
+    }
+
+    if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
+        return false;
+    }
+
+    $binary = @inet_pton($ip);
+
+    if ($binary === false || strlen($binary) < 2) {
+        return false;
+    }
+
+    $b0 = ord($binary[0]);
+    $b1 = ord($binary[1]);
+
+    // Unique local fc00::/7 or link-local fe80::/10
+    return ($b0 & 0xfe) === 0xfc || ($b0 === 0xfe && ($b1 & 0xc0) === 0x80);
+}
+
 function inspector_is_platform(string $root): bool
 {
     $root = normalize_path($root);

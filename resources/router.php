@@ -18,9 +18,9 @@ if ($basePath !== '' && ($path === $basePath || str_starts_with($path, $basePath
 }
 
 $remoteAddress = (string) ($_SERVER['REMOTE_ADDR'] ?? '127.0.0.1');
-if (!str_starts_with($remoteAddress, '127.') && $remoteAddress !== '::1') {
+if (!inspector_client_allowed($remoteAddress)) {
     http_response_code(403);
-    echo 'Pinx Inspector is local-only.';
+    echo 'Pinx Inspector is local/LAN-only. Use pinx dev -N on a private network, or open from 127.0.0.1.';
     return;
 }
 
