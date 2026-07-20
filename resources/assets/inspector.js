@@ -471,7 +471,8 @@
       return `<div class="rounded-2xl border border-white/10 bg-black/20 px-4 py-3"><div class="text-xs uppercase tracking-wide text-slate-500">${esc(label)}</div><div class="mt-1 truncate font-bold text-slate-100">${esc(value)}</div></div>`;
     }
 
-    async function loadTables() {
+    async function loadTables(options = {}) {
+      const autoOpen = options.autoOpen !== false;
       const payload = await api('/api/tables');
       state.tables = payload.tables || [];
       if ($('tableCount')) $('tableCount').textContent = state.tables.length + ' tables';
@@ -479,6 +480,49 @@
       renderTableListModern($('tables'));
       renderTableListModern($('tablesDb'));
       initQueryBuilder();
+      if (autoOpen && state.view === 'database') {
+        await openDefaultTableWorkspace();
+      }
+    }
+
+    function showTablesEmptyState(message = 'No tables were found on the active connection.') {
+      const breadcrumb = $('tableBreadcrumb');
+      if (breadcrumb) {
+        breadcrumb.classList.add('hidden');
+        breadcrumb.classList.remove('flex');
+      }
+      if (!$('databaseContent')) return;
+      $('databaseContent').innerHTML = `
+        <div class="grid h-full min-h-[680px] place-items-center p-8 text-center">
+          <div>
+            <div class="mx-auto grid h-16 w-16 place-items-center rounded-3xl border border-violet-300/20 bg-violet-400/10 text-violet-200">${icon('database', 'h-7 w-7')}</div>
+            <div class="mt-4 text-lg font-black text-white">No tables yet</div>
+            <div class="mt-1 text-sm text-slate-500">${esc(message)}</div>
+            <div class="mt-5 flex flex-wrap justify-center gap-2">
+              <button onclick="openSchemaBuilder('table')" class="rounded-xl bg-violet-500 px-4 py-2 text-sm font-bold text-white hover:bg-violet-400">Add Table</button>
+              <button onclick="runInspectorAction('migrate')" class="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-bold text-slate-200 hover:bg-white/10">Run Migrations</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    async function openDefaultTableWorkspace() {
+      const names = (state.tables || []).map(table => table.name).filter(Boolean);
+      if (!names.length) {
+        state.selected = null;
+        showTablesEmptyState();
+        return;
+      }
+      if (!state.selected || !names.includes(state.selected)) {
+        state.selected = names[0];
+        state.offset = 0;
+        state.search = '';
+        state.selectedRowKeys = [];
+      }
+      renderTableListModern($('tables'));
+      renderTableListModern($('tablesDb'));
+      await loadTable();
     }
 
     function initQueryBuilder() {
@@ -4750,10 +4794,9 @@
         } else if (view === 'connections') {
           await loadDatabase();
         } else if (view === 'database') {
-          await loadTables();
-          if (state.selected) await loadTable();
+          await loadTables({ autoOpen: true });
         } else if (view === 'query') {
-          await loadTables();
+          await loadTables({ autoOpen: false });
         } else if (view === 'health') {
           await loadHealth();
         } else if (view === 'setup') {

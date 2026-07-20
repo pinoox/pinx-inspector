@@ -4,7 +4,7 @@
           <svg viewBox="0 0 48 48" class="h-7 w-7" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.4" d="M24 5 40 14v20l-16 9-16-9V14L24 5Z"/><path fill="none" stroke="currentColor" stroke-width="2.4" d="m8 14 16 9 16-9M24 23v20M16 18.5l16-9"/></svg>
         </div>
         <div>
-          <div class="flex items-center gap-2"><div class="text-lg font-black tracking-tight">Pinx Inspector</div><span class="rounded-full bg-white/10 px-2 py-0.5 text-[10px] text-slate-300">v1.9.0</span></div>
+          <div class="flex items-center gap-2"><div class="text-lg font-black tracking-tight">Pinx Inspector</div><span class="rounded-full bg-white/10 px-2 py-0.5 text-[10px] text-slate-300">v1.7.3</span></div>
           <div class="text-xs text-slate-400">Runtime and database monitor</div>
         </div>
       </div>
