@@ -1,4 +1,4 @@
-    const state = { selected: null, selectedRowKeys: [], limit: 50, offset: 0, search: '', tableFilter: '', view: 'dashboard', tables: [], database: null, selectedConnectionIndex: 0, connectionDetailTab: 'details', queryTable: '', queryColumns: [], querySelectedColumns: [], queryConditions: [], queryRows: [], queryBuilderMode: 'builder', queryPanelTab: 'results', queryLastPayload: null, queryLastExecutedAt: '', queryHistory: [], queryRawSql: '', queryRawResult: null, savedQueries: [], routes: null, routeSearch: '', routeGroup: 'all', selectedRoute: 0, selectedAction: 0, flow: null, flowSearch: '', flowTab: 'flow', flowType: 'all', flowStatus: 'all', flowGroup: 'web', selectedFlow: 0, migrations: null, migrationSearch: '', migrationStatus: 'all', selectedMigration: 0, migrationDetailTab: 'sql', migrationActionMenu: null, patches: null, patchSearch: '', patchStatus: 'all', selectedPatch: 0, patchActionMenu: null, setup: null, setupOptions: { deps: true, frontend: true, seed: true, patch: true }, setupRunning: false, schedule: null, scheduleSearch: '', scheduleStatus: 'all', selectedSchedule: 0, logs: null, logSearch: '', logLevel: 'all', selectedLog: 0, logLive: false, themes: null, themeSearch: '', selectedTheme: 0, users: null, userSearch: '', userStatus: 'all', selectedUser: 0, lastLogin: null, pinker: null, pinkerTab: 'overview', build: null, views: null, viewSearch: '', viewType: 'all', selectedView: 0, viewEditing: false, lang: null, langSearch: '', langScope: 'all', langLocale: 'all', langSyncReference: 'en', selectedLang: 0, langEditing: false, env: null, config: null, configSearch: '', configCategory: 'all', selectedConfig: 0, configEditing: false, busy: false, ready: false, loaded: {}, loading: {}, platform: false, locked: false, selectable: false, activePackage: '', apps: [] };
+    const state = { selected: null, selectedRowKeys: [], limit: 50, offset: 0, search: '', tableFilter: '', view: 'dashboard', tables: [], database: null, selectedConnectionIndex: 0, connectionDetailTab: 'details', fkPreviewEnabled: false, fkSelectedFields: {}, fkLookupCache: {}, fkPreviewForTable: '', queryTable: '', queryColumns: [], querySelectedColumns: [], queryConditions: [], queryRows: [], queryBuilderMode: 'builder', queryPanelTab: 'results', queryLastPayload: null, queryLastExecutedAt: '', queryHistory: [], queryRawSql: '', queryRawResult: null, savedQueries: [], routes: null, routeSearch: '', routeGroup: 'all', selectedRoute: 0, selectedAction: 0, flow: null, flowSearch: '', flowTab: 'flow', flowType: 'all', flowStatus: 'all', flowGroup: 'web', selectedFlow: 0, migrations: null, migrationSearch: '', migrationStatus: 'all', selectedMigration: 0, migrationDetailTab: 'sql', migrationActionMenu: null, patches: null, patchSearch: '', patchStatus: 'all', selectedPatch: 0, patchActionMenu: null, setup: null, setupOptions: { deps: true, frontend: true, seed: false, patch: true }, setupRunning: false, schedule: null, scheduleSearch: '', scheduleStatus: 'all', selectedSchedule: 0, logs: null, logSearch: '', logLevel: 'all', selectedLog: 0, logLive: false, themes: null, themeSearch: '', selectedTheme: 0, users: null, userSearch: '', userStatus: 'all', selectedUser: 0, lastLogin: null, pinker: null, pinkerTab: 'overview', build: null, views: null, viewSearch: '', viewType: 'all', selectedView: 0, viewEditing: false, lang: null, langSearch: '', langScope: 'all', langLocale: 'all', langSyncReference: 'en', selectedLang: 0, langEditing: false, env: null, config: null, configSearch: '', configCategory: 'all', selectedConfig: 0, configEditing: false, busy: false, ready: false, loaded: {}, loading: {}, platform: false, locked: false, selectable: false, activePackage: '', apps: [] };
     const $ = (id) => document.getElementById(id);
     const base = location.pathname.startsWith('/~inspector') ? '/~inspector' : '';
     const packageStorageKey = 'pinx.inspector.package';
@@ -336,6 +336,10 @@
       state.tables = [];
       state.selected = null;
       state.selectedRowKeys = [];
+      state.fkPreviewEnabled = false;
+      state.fkSelectedFields = {};
+      state.fkLookupCache = {};
+      state.fkPreviewForTable = '';
       state.routes = null;
       state.migrations = null;
       state.flow = null;
@@ -1193,7 +1197,7 @@
         btn.className = 'group w-full rounded-xl border px-3 py-2.5 text-left transition ' + (table.name === state.selected ? 'border-violet-300/60 bg-violet-500/20 shadow-[0_0_24px_rgba(139,92,246,.16)]' : 'border-transparent bg-transparent hover:border-white/10 hover:bg-white/[.05]');
         btn.innerHTML = '<div class="flex items-center justify-between gap-3"><strong class="truncate">' + esc(table.name) + '</strong><span class="rounded-full bg-white/10 px-2 py-0.5 text-xs text-slate-300">' + table.rows + ' rows</span></div><div class="mt-1 text-xs text-slate-500">' + table.columns + ' columns | pk ' + esc(table.primary_key || 'none') + '</div>';
         btn.innerHTML = '<div class="flex items-center justify-between gap-3"><span class="flex min-w-0 items-center gap-2"><span class="grid h-6 w-6 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/5 text-[11px] text-slate-400">#</span><strong class="truncate text-sm text-slate-100">' + esc(table.name) + '</strong></span><span class="rounded-lg bg-white/10 px-2 py-0.5 text-xs text-slate-300">' + table.rows + '</span></div><div class="mt-1 pl-8 text-xs text-slate-500">' + table.columns + ' columns | pk ' + esc(table.primary_key || 'none') + '</div>';
-        btn.onclick = () => { state.selected = table.name; state.offset = 0; state.search = ''; loadTable(); renderTableList($('tables')); renderTableList($('tablesDb')); };
+        btn.onclick = () => { selectInspectorTable(table.name); renderTableList($('tables')); renderTableList($('tablesDb')); };
         wrap.appendChild(btn);
       });
     }
@@ -1211,9 +1215,21 @@
         const btn = document.createElement('button');
         btn.className = 'group w-full rounded-xl px-3 py-2.5 text-left transition ' + (table.name === state.selected ? 'bg-violet-500/25 text-white shadow-[0_0_24px_rgba(139,92,246,.16)]' : 'text-slate-300 hover:bg-white/[.05]');
         btn.innerHTML = '<div class="flex items-center justify-between gap-3"><span class="flex min-w-0 items-center gap-2"><span class="grid h-6 w-6 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/5 text-slate-400">' + icon('table', 'h-3.5 w-3.5') + '</span><strong class="truncate text-sm">' + esc(table.name) + '</strong></span><span class="rounded-lg bg-white/10 px-2 py-0.5 text-xs text-slate-300">' + Number(table.rows || 0).toLocaleString() + '</span></div>';
-        btn.onclick = () => { state.selected = table.name; state.offset = 0; state.search = ''; loadTable(); renderTableListModern($('tables')); renderTableListModern($('tablesDb')); };
+        btn.onclick = () => { selectInspectorTable(table.name); renderTableListModern($('tables')); renderTableListModern($('tablesDb')); };
         wrap.appendChild(btn);
       });
+    }
+
+    function selectInspectorTable(name) {
+      if (state.fkPreviewForTable !== name) {
+        state.fkSelectedFields = {};
+        state.fkLookupCache = {};
+        state.fkPreviewForTable = name;
+      }
+      state.selected = name;
+      state.offset = 0;
+      state.search = '';
+      loadTable();
     }
 
     async function loadTable() {
@@ -1222,7 +1238,199 @@
       if ($('content')) $('content').innerHTML = '';
       $('databaseContent').innerHTML = loadingPanel('Loading table', 'Reading schema and rows for ' + state.selected + '.');
       const payload = await api('/api/table?name=' + encodeURIComponent(state.selected) + '&limit=' + state.limit + '&offset=' + state.offset + '&q=' + encodeURIComponent(state.search));
+      state.fkPreviewForTable = payload.table || state.selected;
+      if (state.fkPreviewEnabled && (payload.relations || []).length) {
+        await loadFkLookups(payload);
+      } else {
+        state.fkLookupCache = {};
+      }
       renderTable(payload);
+    }
+
+    function fkLookupCacheKey(relation) {
+      return String(relation?.references_table || '') + '::' + String(relation?.references_column || 'id') + '::' + String(relation?.column || '');
+    }
+
+    function tableRelations(payload) {
+      return Array.isArray(payload?.relations) ? payload.relations.filter(rel => rel && rel.column && rel.references_table) : [];
+    }
+
+    function relationByFkColumn(payload, fkColumn) {
+      return tableRelations(payload).find(rel => rel.column === fkColumn) || null;
+    }
+
+    async function loadFkLookups(payload) {
+      const relations = tableRelations(payload);
+      const rows = payload.rows || [];
+      const cache = {};
+      await Promise.all(relations.map(async (rel) => {
+        const key = fkLookupCacheKey(rel);
+        const values = Array.from(new Set(rows.map(row => row?.[rel.column]).filter(value => value !== null && value !== undefined && value !== '').map(value => String(value))));
+        try {
+          const result = await post('/api/table/lookup', {
+            table: rel.references_table,
+            column: rel.references_column || 'id',
+            values,
+          });
+          cache[key] = result;
+        } catch (error) {
+          cache[key] = {
+            ok: false,
+            table: rel.references_table,
+            column: rel.references_column || 'id',
+            columns: {},
+            rows: {},
+            count: 0,
+            message: error.message || 'Lookup failed.',
+          };
+        }
+      }));
+      state.fkLookupCache = cache;
+    }
+
+    function fkSelectedFieldKey(fkColumn, field) {
+      return String(fkColumn) + '::' + String(field);
+    }
+
+    function selectedFkPreviewColumns(payload) {
+      if (!state.fkPreviewEnabled) return [];
+      const columns = [];
+      tableRelations(payload).forEach(rel => {
+        const lookup = state.fkLookupCache[fkLookupCacheKey(rel)] || {};
+        const relatedColumns = Object.keys(lookup.columns || {});
+        relatedColumns.forEach(field => {
+          if (state.fkSelectedFields[fkSelectedFieldKey(rel.column, field)]) {
+            columns.push({
+              fkColumn: rel.column,
+              field,
+              label: rel.column + ' → ' + field,
+              table: rel.references_table,
+              referencesColumn: rel.references_column || 'id',
+            });
+          }
+        });
+      });
+      return columns;
+    }
+
+    function relatedRowForFk(relation, value) {
+      if (value === null || value === undefined || value === '') return null;
+      const lookup = state.fkLookupCache[fkLookupCacheKey(relation)] || {};
+      return lookup.rows?.[String(value)] || null;
+    }
+
+    function fkPreviewPanelHtml(payload) {
+      if (!state.fkPreviewEnabled) return '';
+      const relations = tableRelations(payload);
+      if (!relations.length) {
+        return `<div class="mt-3 rounded-2xl border border-dashed border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-500">No foreign keys detected on this table.</div>`;
+      }
+      return `
+        <div class="mt-3 rounded-2xl border border-violet-300/20 bg-violet-500/10 p-4">
+          <div class="text-sm font-black text-violet-100">Foreign fields in table</div>
+          <div class="mt-1 text-xs text-slate-400">Click a foreign key cell to open the related row. Tick fields to show them as extra columns.</div>
+          <div class="mt-4 grid gap-3">
+            ${relations.map(rel => {
+              const lookup = state.fkLookupCache[fkLookupCacheKey(rel)] || {};
+              const fields = Object.keys(lookup.columns || {});
+              const error = lookup.message || '';
+              return `
+                <div class="rounded-2xl border border-white/10 bg-black/20 p-3">
+                  <div class="flex flex-wrap items-center gap-2 text-sm">
+                    <code class="rounded-lg border border-amber-300/20 bg-amber-400/10 px-2 py-1 text-xs font-bold text-amber-100">${esc(rel.column)}</code>
+                    <span class="text-slate-500">→</span>
+                    <span class="font-bold text-slate-200">${esc(rel.references_table)}.${esc(rel.references_column || 'id')}</span>
+                    ${error ? `<span class="text-xs text-rose-300">${esc(error)}</span>` : ''}
+                  </div>
+                  <div class="mt-3 flex flex-wrap gap-2">
+                    ${fields.length ? fields.map(field => {
+                      const checked = !!state.fkSelectedFields[fkSelectedFieldKey(rel.column, field)];
+                      return `<label class="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-white/10 bg-white/[.03] px-2.5 py-1.5 text-xs text-slate-300 hover:bg-white/[.06]"><input type="checkbox" class="fk-preview-field h-3.5 w-3.5 rounded border-slate-600 bg-black/30 text-violet-500 focus:ring-violet-400" data-fk-column="${esc(rel.column)}" data-fk-field="${esc(field)}" ${checked ? 'checked' : ''}><span>${esc(field)}</span></label>`;
+                    }).join('') : '<span class="text-xs text-slate-500">Related columns are not available yet.</span>'}
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+      `;
+    }
+
+    function toggleFkPreview(enabled) {
+      state.fkPreviewEnabled = !!enabled;
+      if (!state.fkPreviewEnabled) {
+        state.fkLookupCache = {};
+        if (state.tablePayload) renderTable(state.tablePayload);
+        return;
+      }
+      loadTable();
+    }
+
+    function toggleFkPreviewField(fkColumn, field, checked) {
+      const key = fkSelectedFieldKey(fkColumn, field);
+      if (checked) state.fkSelectedFields[key] = true;
+      else delete state.fkSelectedFields[key];
+      if (state.tablePayload) renderTable(state.tablePayload);
+    }
+
+    function browseCellHtml(payload, row, header) {
+      const relation = relationByFkColumn(payload, header);
+      const value = row[header];
+      if (state.fkPreviewEnabled && relation) {
+        const related = relatedRowForFk(relation, value);
+        const label = value === null || value === undefined || value === '' ? '—' : cell(value);
+        const title = related ? 'Open related row from ' + relation.references_table : 'Related row not found';
+        return '<td class="max-w-[260px] truncate px-4 py-4 text-slate-200" title="' + esc(title) + '"><button type="button" class="fk-cell-btn inline-flex max-w-full items-center gap-1.5 rounded-lg border border-violet-300/25 bg-violet-500/10 px-2 py-1 text-left text-violet-100 hover:bg-violet-500/20" data-fk-column="' + esc(relation.column) + '" data-fk-value="' + esc(value ?? '') + '"><span class="truncate">' + label + '</span><span class="shrink-0 text-[10px] uppercase tracking-wide text-violet-300/80">fk</span></button></td>';
+      }
+      return '<td class="max-w-[260px] truncate px-4 py-4 text-slate-200" title="' + esc(typeof value === 'object' ? JSON.stringify(value) : value) + '">' + cell(value) + '</td>';
+    }
+
+    function previewCellHtml(relationPreview, row, payload) {
+      const relation = relationByFkColumn(payload, relationPreview.fkColumn);
+      const related = relation ? relatedRowForFk(relation, row[relationPreview.fkColumn]) : null;
+      const value = related ? related[relationPreview.field] : null;
+      const missing = !related;
+      return '<td class="max-w-[220px] truncate px-4 py-4 ' + (missing ? 'text-slate-600' : 'text-sky-100') + '" title="' + esc(missing ? 'Related row not found' : (typeof value === 'object' ? JSON.stringify(value) : value)) + '">' + (missing ? '<span class="text-slate-600">—</span>' : cell(value)) + '</td>';
+    }
+
+    function openFkRelatedRow(fkColumn, value) {
+      const payload = state.tablePayload || {};
+      const relation = relationByFkColumn(payload, fkColumn);
+      if (!relation) {
+        showOperation('warn', 'No relation', 'This column is not linked to a foreign table.');
+        return;
+      }
+      const related = relatedRowForFk(relation, value);
+      const title = relation.references_table + (value !== '' && value !== null && value !== undefined ? ' #' + value : '');
+      if (!related) {
+        openDetailDrawerHtml(title, `<div class="rounded-2xl border border-dashed border-white/10 p-6 text-center text-slate-500"><div class="text-base font-bold text-slate-300">Related row not found</div><div class="mt-2 text-sm">${esc(relation.column)} = ${esc(value ?? '')} has no match in ${esc(relation.references_table)}.</div></div>`, 'Foreign Key');
+        return;
+      }
+      const rows = Object.keys(related).map(key => `
+        <tr class="border-t border-white/10">
+          <td class="px-3 py-2.5 text-xs font-bold uppercase tracking-wide text-slate-500">${esc(key)}</td>
+          <td class="px-3 py-2.5 text-sm text-slate-100 break-all">${cell(related[key])}</td>
+        </tr>
+      `).join('');
+      openDetailDrawerHtml(title, `
+        <div class="mb-3 rounded-2xl border border-violet-300/20 bg-violet-500/10 px-3 py-2 text-xs text-violet-100">
+          ${esc(payload.table)}.${esc(relation.column)} → ${esc(relation.references_table)}.${esc(relation.references_column || 'id')}
+        </div>
+        <div class="overflow-hidden rounded-2xl border border-white/10">
+          <table class="w-full text-left"><tbody>${rows}</tbody></table>
+        </div>
+      `, 'Foreign Key');
+    }
+
+    function openDetailDrawerHtml(title, html, eyebrow = 'Inspector Details') {
+      const drawer = $('detailDrawer');
+      if (!drawer) return;
+      openDetailDrawerFrom.panelId = '';
+      $('detailDrawerEyebrow').textContent = eyebrow;
+      $('detailDrawerTitle').textContent = title || 'Details';
+      $('detailDrawerBody').innerHTML = html;
+      drawer.classList.remove('hidden');
+      document.body.classList.add('overflow-hidden');
     }
 
     function renderTable(payload) {
@@ -1251,16 +1459,21 @@
       const tablePanel = $('databaseContent');
       tablePanel.querySelector('#limit').onchange = (event) => { state.limit = Math.max(1, Math.min(500, Number(event.target.value || 50))); state.offset = 0; loadTable(); };
       tablePanel.querySelector('#search').onkeydown = (event) => { if (event.key === 'Enter') applySearch(); };
+      tablePanel.querySelectorAll('.fk-preview-field').forEach((input) => {
+        input.onchange = () => toggleFkPreviewField(input.dataset.fkColumn || '', input.dataset.fkField || '', input.checked);
+      });
     }
 
     function tableWorkspaceHtml(payload, columns, rowHeaders) {
       const rows = payload.rows || [];
       const visibleHeaders = rowHeaders.slice(0, 8);
+      const previewColumns = selectedFkPreviewColumns(payload);
       const primary = payload.primary_key || '';
-      const dataRows = rows.map((row, index) => {
+      const colSpan = visibleHeaders.length + previewColumns.length + 2;
+      const dataRows = rows.map((row) => {
         const key = primary ? row[primary] : '';
         const disabled = key === undefined || key === null || key === '';
-        return '<tr class="border-t border-white/10 hover:bg-white/[.035]"><td class="w-12 px-4 py-3"><input type="checkbox" class="table-row-checkbox h-4 w-4 rounded border-slate-600 bg-black/30 text-violet-500 focus:ring-violet-400" data-key="' + esc(key ?? '') + '" ' + (disabled ? 'disabled title="This row has no primary key value"' : '') + ' onchange="syncTableSelection()"></td>' + visibleHeaders.map(key => '<td class="max-w-[260px] truncate px-4 py-4 text-slate-200" title="' + esc(typeof row[key] === 'object' ? JSON.stringify(row[key]) : row[key]) + '">' + cell(row[key]) + '</td>').join('') + '<td class="w-24 px-4 py-3 text-right"><button type="button" data-table-delete-key="' + esc(key ?? '') + '" ' + (disabled ? 'disabled' : '') + ' class="table-row-delete-btn rounded-lg border border-rose-300/20 bg-rose-500/10 px-2.5 py-1.5 text-xs font-bold text-rose-200 hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-40">Delete</button></td></tr>';
+        return '<tr class="border-t border-white/10 hover:bg-white/[.035]"><td class="w-12 px-4 py-3"><input type="checkbox" class="table-row-checkbox h-4 w-4 rounded border-slate-600 bg-black/30 text-violet-500 focus:ring-violet-400" data-key="' + esc(key ?? '') + '" ' + (disabled ? 'disabled title="This row has no primary key value"' : '') + ' onchange="syncTableSelection()"></td>' + visibleHeaders.map(header => browseCellHtml(payload, row, header)).join('') + previewColumns.map(preview => previewCellHtml(preview, row, payload)).join('') + '<td class="w-24 px-4 py-3 text-right"><button type="button" data-table-delete-key="' + esc(key ?? '') + '" ' + (disabled ? 'disabled' : '') + ' class="table-row-delete-btn rounded-lg border border-rose-300/20 bg-rose-500/10 px-2.5 py-1.5 text-xs font-bold text-rose-200 hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-40">Delete</button></td></tr>';
       }).join('');
       const breadcrumb = $('tableBreadcrumb');
       if (breadcrumb) {
@@ -1272,6 +1485,7 @@
       const engine = payload.engine || state.database?.connection?.engine_label || 'Database';
       const approxSize = formatBytes(Math.max(1024, Number(payload.row_count || 0) * Math.max(1, columns.length) * 32));
       const typeLabel = engine === 'devdb-json' || engine === 'devdb-sqlite' ? 'DevDB' : engine;
+      const hasRelations = tableRelations(payload).length > 0;
 
       return `
         <div class="border-b border-white/10 p-4 pb-0">
@@ -1298,7 +1512,9 @@
         <div class="border-b border-white/10 bg-[#0b1524]/80 p-4">
           <div class="flex items-center justify-between gap-3 max-xl:flex-col max-xl:items-stretch">
             <div class="flex flex-wrap gap-2"><input id="search" class="h-10 min-w-72 rounded-xl border border-white/10 bg-black/30 px-3 text-sm text-slate-100 outline-none focus:border-violet-300" placeholder="Search in ${esc(payload.table)}..." value="${esc(state.search)}"><button class="rounded-xl bg-violet-500 px-3 py-2 text-sm font-bold text-white" onclick="applySearch()">Search</button><input id="limit" class="h-10 w-20 rounded-xl border border-white/10 bg-black/30 px-3 text-sm" type="number" min="1" max="500" value="${state.limit}"></div>
+            ${hasRelations ? `<label class="inline-flex cursor-pointer items-center gap-2 self-start rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm font-bold text-slate-100"><input type="checkbox" class="h-4 w-4 rounded border-slate-600 bg-black/30 text-violet-500 focus:ring-violet-400" ${state.fkPreviewEnabled ? 'checked' : ''} onchange="toggleFkPreview(this.checked)"><span>Show foreign data</span></label>` : ''}
           </div>
+          ${hasRelations ? fkPreviewPanelHtml(payload) : ''}
         </div>
         <div id="newRowPanel" class="hidden border-b border-white/10 bg-[#091320]/95 p-4"></div>
         <div id="tableBrowsePanel" class="overflow-auto">
@@ -1306,9 +1522,10 @@
             <thead class="bg-white/[.035] text-xs uppercase text-slate-500"><tr><th class="w-12 px-4 py-3"><input type="checkbox" class="h-4 w-4 rounded border-slate-600 bg-black/30 text-violet-500 focus:ring-violet-400" onchange="toggleAllTableRows(this.checked)"></th>${visibleHeaders.map(h => {
               const col = payload.columns?.[h] || {};
               const pk = payload.primary_key === h || col.primary;
-              return '<th class="px-4 py-3"><div class="flex items-center gap-1 font-bold text-slate-300">' + (pk ? '<span class="text-amber-300">key</span>' : '') + esc(h) + '</div><div class="mt-0.5 font-normal text-slate-600">' + esc(col.type || '') + '</div></th>';
-            }).join('')}<th class="px-4 py-3 text-right">Actions</th></tr></thead>
-            <tbody>${dataRows || '<tr><td colspan="' + (rowHeaders.length + 1) + '" class="px-4 py-10 text-center text-slate-500">No rows found</td></tr>'}</tbody>
+              const isFk = !!relationByFkColumn(payload, h);
+              return '<th class="px-4 py-3"><div class="flex items-center gap-1 font-bold text-slate-300">' + (pk ? '<span class="text-amber-300">key</span>' : '') + (isFk && state.fkPreviewEnabled ? '<span class="text-violet-300">fk</span>' : '') + esc(h) + '</div><div class="mt-0.5 font-normal text-slate-600">' + esc(col.type || '') + '</div></th>';
+            }).join('')}${previewColumns.map(preview => '<th class="px-4 py-3"><div class="font-bold text-sky-200">' + esc(preview.label) + '</div><div class="mt-0.5 font-normal normal-case text-slate-600">' + esc(preview.table) + '</div></th>').join('')}<th class="px-4 py-3 text-right">Actions</th></tr></thead>
+            <tbody>${dataRows || '<tr><td colspan="' + colSpan + '" class="px-4 py-10 text-center text-slate-500">No rows found</td></tr>'}</tbody>
           </table>
         </div>
         <div id="tableMetaPanel" class="hidden p-4"></div>
@@ -4297,6 +4514,13 @@
         event.stopPropagation();
         const key = rowDeleteButton.dataset.tableDeleteKey || '';
         deleteTableRows(key ? [key] : []);
+        return;
+      }
+      const fkCellButton = event.target.closest?.('.fk-cell-btn');
+      if (fkCellButton) {
+        event.preventDefault();
+        event.stopPropagation();
+        openFkRelatedRow(fkCellButton.dataset.fkColumn || '', fkCellButton.dataset.fkValue || '');
         return;
       }
       const copyButton = event.target.closest?.('.copy-btn');

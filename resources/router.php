@@ -78,6 +78,17 @@ try {
         return;
     }
 
+    if ($path === '/api/table/lookup') {
+        if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
+            json_response(['error' => true, 'message' => 'POST is required.'], 405);
+            return;
+        }
+
+        $payload = json_decode((string) file_get_contents('php://input'), true);
+        json_response(table_lookup_payload($root, is_array($payload) ? $payload : []));
+        return;
+    }
+
     if ($path === '/api/table/insert') {
         if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
             json_response(['error' => true, 'message' => 'POST is required.'], 405);
@@ -1237,6 +1248,125 @@ function table_payload(string $root, string $table, int $limit, int $offset): ar
         'devdb-sqlite' => devdb_sqlite_table_payload($root, $table, $limit, $offset, $search),
         default => devdb_json_table_payload($root, $table, $limit, $offset, $search),
     };
+}
+
+/**
+ * Lookup related rows by primary/foreign key values for FK preview in the table browser.
+ *
+ * @param array<string, mixed> $payload
+ * @return array{ok: bool, table: string, column: string, columns: array<string, mixed>, rows: array<string, array<string, mixed>>, count: int}
+ */
+function table_lookup_payload(string $root, array $payload): array
+{
+    $table = trim((string) ($payload['table'] ?? ''));
+    $column = trim((string) ($payload['column'] ?? ''));
+    $rawValues = is_array($payload['values'] ?? null) ? $payload['values'] : [];
+
+    if ($table === '' || $column === '') {
+        throw new RuntimeException('Table and column are required for lookup.');
+    }
+
+    $values = [];
+    foreach ($rawValues as $value) {
+        if ($value === null || $value === '') {
+            continue;
+        }
+        if (is_scalar($value)) {
+            $values[] = (string) $value;
+        }
+    }
+    $values = array_values(array_unique($values));
+    if (count($values) > 200) {
+        $values = array_slice($values, 0, 200);
+    }
+
+    return match (engine($root)) {
+        'mysql' => pdo_table_lookup_payload($root, 'mysql', $table, $column, $values),
+        'pgsql' => pdo_table_lookup_payload($root, 'pgsql', $table, $column, $values),
+        'sqlite' => pdo_table_lookup_payload($root, 'sqlite', $table, $column, $values),
+        'devdb-sqlite' => pdo_table_lookup_payload($root, 'sqlite', $table, $column, $values, true),
+        default => devdb_json_table_lookup_payload($root, $table, $column, $values),
+    };
+}
+
+/**
+ * @param list<string> $values
+ * @return array{ok: bool, table: string, column: string, columns: array<string, mixed>, rows: array<string, array<string, mixed>>, count: int}
+ */
+function pdo_table_lookup_payload(string $root, string $driver, string $table, string $column, array $values, bool $devdbSqlite = false): array
+{
+    $pdo = $devdbSqlite ? sqlite_pdo($root) : pdo_for_connection($root, $driver);
+    $columns = pdo_columns($pdo, $driver, $table);
+    if ($columns === [] || !isset($columns[$column])) {
+        throw new RuntimeException('Lookup column "' . $column . '" was not found on table "' . $table . '".');
+    }
+
+    $rows = [];
+    if ($values !== []) {
+        $placeholders = implode(', ', array_fill(0, count($values), '?'));
+        $quotedTable = quote_identifier_for($driver, $table);
+        $quotedColumn = quote_identifier_for($driver, $column);
+        $statement = $pdo->prepare('SELECT * FROM ' . $quotedTable . ' WHERE ' . $quotedColumn . ' IN (' . $placeholders . ')');
+        $statement->execute($values);
+        $fetched = $statement->fetchAll(PDO::FETCH_ASSOC);
+
+        foreach ($fetched as $row) {
+            if (!is_array($row) || !array_key_exists($column, $row)) {
+                continue;
+            }
+            $rows[(string) $row[$column]] = $row;
+        }
+    }
+
+    return [
+        'ok' => true,
+        'table' => $table,
+        'column' => $column,
+        'columns' => $columns,
+        'rows' => $rows,
+        'count' => count($rows),
+    ];
+}
+
+/**
+ * @param list<string> $values
+ * @return array{ok: bool, table: string, column: string, columns: array<string, mixed>, rows: array<string, array<string, mixed>>, count: int}
+ */
+function devdb_json_table_lookup_payload(string $root, string $table, string $column, array $values): array
+{
+    $schema = json_file(devdb_path($root) . '/schema.json', ['tables' => []]);
+    $meta = $schema['tables'][$table] ?? null;
+    if (!is_array($meta)) {
+        throw new RuntimeException('Table "' . $table . '" does not exist.');
+    }
+
+    $columns = is_array($meta['columns'] ?? null) ? $meta['columns'] : [];
+    if ($columns !== [] && !isset($columns[$column])) {
+        throw new RuntimeException('Lookup column "' . $column . '" was not found on table "' . $table . '".');
+    }
+
+    $wanted = array_fill_keys($values, true);
+    $allRows = json_file(devdb_path($root) . '/data/' . safe_table_file($table) . '.json', []);
+    $rows = [];
+    foreach ($allRows as $row) {
+        if (!is_array($row) || !array_key_exists($column, $row)) {
+            continue;
+        }
+        $key = (string) $row[$column];
+        if (!isset($wanted[$key])) {
+            continue;
+        }
+        $rows[$key] = $row;
+    }
+
+    return [
+        'ok' => true,
+        'table' => $table,
+        'column' => $column,
+        'columns' => $columns,
+        'rows' => $rows,
+        'count' => count($rows),
+    ];
 }
 
 function insert_table_row_payload(string $root, array $payload): array
