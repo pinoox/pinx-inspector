@@ -1,4 +1,4 @@
-  <div id="langToolsModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/70 p-4 backdrop-blur-sm" onclick="if (event.target === this) closeLangToolModal()">
+  <div id="langToolsModal" class="fixed inset-0 hidden items-center justify-center bg-black/70 p-4 backdrop-blur-sm" style="z-index:70" onclick="if (event.target === this) closeLangToolModal()">
     <div class="w-full max-w-lg overflow-hidden rounded-3xl border border-white/10 bg-[#08111f] shadow-[0_28px_90px_rgba(0,0,0,.55)]">
       <div class="flex items-start justify-between gap-3 border-b border-white/10 px-5 py-4">
         <div>

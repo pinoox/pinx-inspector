@@ -86,6 +86,8 @@
         if (button.closest('#jsonModal')) return;
         if (button.closest('#detailDrawer')) return;
         if (button.closest('#confirmModal')) return;
+        if (button.closest('#schemaBuilderModal')) return;
+        if (button.closest('#langToolsModal')) return;
         button.disabled = busy;
         button.classList.toggle('opacity-55', busy);
         button.classList.toggle('cursor-wait', busy);
@@ -2140,7 +2142,16 @@
       const preview = $('schemaPreviewCode');
       if (preview) preview.textContent = state.schemaBuilder.previewCode || '';
       const label = preview?.previousElementSibling?.querySelector?.('.text-xs');
-      // filename shown via re-render is enough when we call renderSchemaBuilder after
+      if (label) label.textContent = state.schemaBuilder.previewFilename || 'Preview appears here';
+    }
+
+    function scrollSchemaPreviewIntoView() {
+      const preview = $('schemaPreviewCode');
+      const body = $('schemaBuilderBody');
+      if (!preview || !body) return;
+      preview.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      const top = preview.offsetTop - 16;
+      if (Number.isFinite(top)) body.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
     }
 
     async function previewSchemaBuilder() {
@@ -2153,6 +2164,7 @@
         const result = await post('/api/migration/preview', payload);
         applySchemaPreview(result);
         renderSchemaBuilder();
+        scrollSchemaPreviewIntoView();
       }, 'Migration preview is ready.');
     }
 
@@ -2184,6 +2196,7 @@
         }
         applySchemaPreview(result);
         renderSchemaBuilder();
+        scrollSchemaPreviewIntoView();
         if (payload.create_in_database) {
           await loadTables();
           if (result.physical_table || result.table) {
