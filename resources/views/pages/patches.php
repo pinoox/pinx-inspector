@@ -3,7 +3,7 @@
           <div class="min-w-0">
             <div class="ux-page-head">
               <div>
-                <div class="ux-page-kicker">Database / Data</div>
+                <div class="ux-page-kicker">Application / Data</div>
                 <div class="flex items-center gap-3"><h2 class="ux-page-title">Patches</h2><span id="patchesTotalBadge" class="rounded-xl bg-teal-400/20 px-3 py-1 text-sm font-bold text-teal-200">0</span></div>
                 <p class="ux-page-copy">Run, inspect, and roll back one-off data patches from a single workspace.</p>
               </div>

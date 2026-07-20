@@ -100,6 +100,17 @@ try {
         return;
     }
 
+    if ($path === '/api/table/update') {
+        if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
+            json_response(['error' => true, 'message' => 'POST is required.'], 405);
+            return;
+        }
+
+        $payload = json_decode((string) file_get_contents('php://input'), true);
+        json_response(update_table_row_payload($root, is_array($payload) ? $payload : []));
+        return;
+    }
+
     if ($path === '/api/table/delete') {
         if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
             json_response(['error' => true, 'message' => 'POST is required.'], 405);
@@ -1548,6 +1559,139 @@ function devdb_json_insert_table_row(string $root, string $table, array $values)
     ];
 }
 
+/**
+ * @param array<string, mixed> $payload
+ * @return array{ok: bool, table: string, engine: string, message: string}
+ */
+function update_table_row_payload(string $root, array $payload): array
+{
+    $table = trim((string) ($payload['table'] ?? ''));
+    if ($table === '') {
+        throw new RuntimeException('Table name is required.');
+    }
+
+    $key = $payload['key'] ?? null;
+    if ($key === null || $key === '') {
+        throw new RuntimeException('Primary key value is required to update a row.');
+    }
+
+    $values = is_array($payload['values'] ?? null) ? $payload['values'] : [];
+
+    return match (engine($root)) {
+        'mysql' => pdo_update_table_row($root, 'mysql', $table, $key, $values),
+        'pgsql' => pdo_update_table_row($root, 'pgsql', $table, $key, $values),
+        'sqlite' => pdo_update_table_row($root, 'sqlite', $table, $key, $values),
+        'devdb-sqlite' => pdo_update_table_row($root, 'sqlite', $table, $key, $values, true),
+        default => devdb_json_update_table_row($root, $table, $key, $values),
+    };
+}
+
+/**
+ * @param array<string, mixed> $values
+ * @return array{ok: bool, table: string, engine: string, updated: int, message: string}
+ */
+function pdo_update_table_row(string $root, string $driver, string $table, mixed $key, array $values, bool $devdbSqlite = false): array
+{
+    $pdo = $devdbSqlite ? sqlite_pdo($root) : pdo_for_connection($root, $driver);
+    $columns = $driver === 'sqlite' ? sqlite_columns($pdo, $table) : pdo_columns($pdo, $driver, $table);
+    if ($columns === []) {
+        throw new RuntimeException('Table "' . $table . '" does not exist.');
+    }
+
+    $primary = sqlite_primary_key($columns);
+    if ($primary === null || $primary === '') {
+        throw new RuntimeException('This table has no primary key, so Inspector cannot update rows safely.');
+    }
+
+    $row = prepared_row_values($columns, $values, false);
+    unset($row[$primary]);
+    if ($row === []) {
+        throw new RuntimeException('No column values were provided for update.');
+    }
+
+    $quote = static fn (string $name): string => $driver === 'sqlite' ? quote_identifier($name) : quote_identifier_for($driver, $name);
+    $quotedTable = $quote($table);
+    $assignments = [];
+    $params = [];
+    foreach ($row as $name => $value) {
+        $assignments[] = $quote((string) $name) . ' = ?';
+        $params[] = $value;
+    }
+    $params[] = $key;
+
+    $statement = $pdo->prepare(
+        'UPDATE ' . $quotedTable
+        . ' SET ' . implode(', ', $assignments)
+        . ' WHERE ' . $quote($primary) . ' = ?'
+    );
+    $statement->execute($params);
+
+    return [
+        'ok' => true,
+        'table' => $table,
+        'engine' => $devdbSqlite ? 'devdb-sqlite' : $driver,
+        'updated' => $statement->rowCount(),
+        'message' => 'Row was updated in ' . $table . '.',
+    ];
+}
+
+/**
+ * @param array<string, mixed> $values
+ * @return array{ok: bool, table: string, engine: string, updated: int, message: string}
+ */
+function devdb_json_update_table_row(string $root, string $table, mixed $key, array $values): array
+{
+    $schema = json_file(devdb_path($root) . '/schema.json', ['tables' => []]);
+    $meta = $schema['tables'][$table] ?? null;
+    if (!is_array($meta)) {
+        throw new RuntimeException('Table "' . $table . '" does not exist.');
+    }
+
+    $primary = (string) ($meta['primary_key'] ?? '');
+    if ($primary === '') {
+        throw new RuntimeException('This DevDB JSON table has no primary key, so Inspector cannot update rows safely.');
+    }
+
+    $columns = is_array($meta['columns'] ?? null) ? $meta['columns'] : [];
+    $row = prepared_row_values($columns, $values, false);
+    unset($row[$primary]);
+    if ($row === []) {
+        throw new RuntimeException('No column values were provided for update.');
+    }
+
+    $updated = 0;
+    $keyText = (string) $key;
+    $path = devdb_path($root) . '/data/' . safe_table_file($table) . '.json';
+    locked_json_update($path, [], static function (array $rows) use ($primary, $keyText, $row, &$updated): array {
+        foreach ($rows as $index => $existing) {
+            if (!is_array($existing)) {
+                continue;
+            }
+            if ((string) ($existing[$primary] ?? '') !== $keyText) {
+                continue;
+            }
+            $rows[$index] = array_merge($existing, $row);
+            $rows[$index][$primary] = $existing[$primary];
+            $updated = 1;
+            break;
+        }
+
+        return $rows;
+    });
+
+    if ($updated === 0) {
+        throw new RuntimeException('Row with primary key "' . $keyText . '" was not found.');
+    }
+
+    return [
+        'ok' => true,
+        'table' => $table,
+        'engine' => 'devdb-json',
+        'updated' => $updated,
+        'message' => 'Row was updated in ' . $table . '.',
+    ];
+}
+
 function delete_table_rows_payload(string $root, array $payload): array
 {
     $table = trim((string) ($payload['table'] ?? ''));
@@ -1642,18 +1786,32 @@ function devdb_json_delete_table_rows(string $root, string $table, array $keys):
  */
 function empty_table_payload(string $root, array $payload): array
 {
-    $table = trim((string) ($payload['table'] ?? ''));
-    if ($table === '') {
+    $tables = schema_table_names_from_payload($payload);
+    if ($tables === []) {
         throw new RuntimeException('Table name is required.');
     }
 
-    return match (engine($root)) {
-        'mysql' => pdo_empty_table($root, 'mysql', $table),
-        'pgsql' => pdo_empty_table($root, 'pgsql', $table),
-        'sqlite' => pdo_empty_table($root, 'sqlite', $table),
-        'devdb-sqlite' => pdo_empty_table($root, 'sqlite', $table, true),
-        default => devdb_json_empty_table($root, $table),
-    };
+    $results = [];
+    foreach ($tables as $table) {
+        $results[] = match (engine($root)) {
+            'mysql' => pdo_empty_table($root, 'mysql', $table),
+            'pgsql' => pdo_empty_table($root, 'pgsql', $table),
+            'sqlite' => pdo_empty_table($root, 'sqlite', $table),
+            'devdb-sqlite' => pdo_empty_table($root, 'sqlite', $table, true),
+            default => devdb_json_empty_table($root, $table),
+        };
+    }
+
+    $count = count($tables);
+
+    return [
+        'ok' => true,
+        'table' => $tables[0],
+        'tables' => $tables,
+        'results' => $results,
+        'engine' => engine($root),
+        'message' => $count === 1 ? 'Table ' . $tables[0] . ' was emptied.' : $count . ' tables were emptied.',
+    ];
 }
 
 function pdo_empty_table(string $root, string $driver, string $table, bool $devdbSqlite = false): array
@@ -1743,18 +1901,56 @@ function devdb_json_empty_table(string $root, string $table): array
  */
 function drop_table_payload(string $root, array $payload): array
 {
-    $table = trim((string) ($payload['table'] ?? ''));
-    if ($table === '') {
+    $tables = schema_table_names_from_payload($payload);
+    if ($tables === []) {
         throw new RuntimeException('Table name is required.');
     }
 
-    return match (engine($root)) {
-        'mysql' => pdo_drop_table($root, 'mysql', $table),
-        'pgsql' => pdo_drop_table($root, 'pgsql', $table),
-        'sqlite' => pdo_drop_table($root, 'sqlite', $table),
-        'devdb-sqlite' => pdo_drop_table($root, 'sqlite', $table, true),
-        default => devdb_json_drop_table($root, $table),
-    };
+    $results = [];
+    foreach ($tables as $table) {
+        $results[] = match (engine($root)) {
+            'mysql' => pdo_drop_table($root, 'mysql', $table),
+            'pgsql' => pdo_drop_table($root, 'pgsql', $table),
+            'sqlite' => pdo_drop_table($root, 'sqlite', $table),
+            'devdb-sqlite' => pdo_drop_table($root, 'sqlite', $table, true),
+            default => devdb_json_drop_table($root, $table),
+        };
+    }
+
+    $count = count($tables);
+
+    return [
+        'ok' => true,
+        'table' => $tables[0],
+        'tables' => $tables,
+        'results' => $results,
+        'engine' => engine($root),
+        'message' => $count === 1 ? 'Table ' . $tables[0] . ' was dropped.' : $count . ' tables were dropped.',
+    ];
+}
+
+/**
+ * @param array<string, mixed> $payload
+ * @return list<string>
+ */
+function schema_table_names_from_payload(array $payload): array
+{
+    $tables = [];
+    if (is_array($payload['tables'] ?? null)) {
+        foreach ($payload['tables'] as $table) {
+            $name = trim((string) $table);
+            if ($name !== '') {
+                $tables[] = $name;
+            }
+        }
+    }
+
+    $single = trim((string) ($payload['table'] ?? ''));
+    if ($single !== '') {
+        $tables[] = $single;
+    }
+
+    return array_values(array_unique($tables));
 }
 
 function pdo_drop_table(string $root, string $driver, string $table, bool $devdbSqlite = false): array

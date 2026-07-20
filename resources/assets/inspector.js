@@ -1,4 +1,4 @@
-    const state = { selected: null, selectedRowKeys: [], limit: 50, offset: 0, search: '', tableFilter: '', view: 'dashboard', tables: [], database: null, selectedConnectionIndex: 0, connectionDetailTab: 'details', fkPreviewEnabled: false, fkSelectedFields: {}, fkLookupCache: {}, fkPreviewForTable: '', schemaBuilder: { mode: 'table', table: '', timestamps: true, softDeletes: false, createInDatabase: true, saveMigration: false, columns: [], previewCode: '', previewFilename: '' }, queryTable: '', queryColumns: [], querySelectedColumns: [], queryConditions: [], queryRows: [], queryBuilderMode: 'builder', queryPanelTab: 'results', queryLastPayload: null, queryLastExecutedAt: '', queryHistory: [], queryRawSql: '', queryRawResult: null, savedQueries: [], routes: null, routeSearch: '', routeGroup: 'all', selectedRoute: 0, selectedAction: 0, flow: null, flowSearch: '', flowTab: 'flow', flowType: 'all', flowStatus: 'all', flowGroup: 'web', selectedFlow: 0, migrations: null, migrationSearch: '', migrationStatus: 'all', selectedMigration: 0, migrationDetailTab: 'sql', migrationActionMenu: null, patches: null, patchSearch: '', patchStatus: 'all', selectedPatch: 0, patchActionMenu: null, setup: null, setupOptions: { deps: true, frontend: true, seed: false, patch: true }, setupRunning: false, schedule: null, scheduleSearch: '', scheduleStatus: 'all', selectedSchedule: 0, logs: null, logSearch: '', logLevel: 'all', selectedLog: 0, logLive: false, themes: null, themeSearch: '', selectedTheme: 0, users: null, userSearch: '', userStatus: 'all', selectedUser: 0, lastLogin: null, pinker: null, pinkerTab: 'overview', build: null, views: null, viewSearch: '', viewType: 'all', selectedView: 0, viewEditing: false, lang: null, langSearch: '', langScope: 'all', langLocale: 'all', langSyncReference: 'en', selectedLang: 0, langEditing: false, env: null, config: null, configSearch: '', configCategory: 'all', selectedConfig: 0, configEditing: false, busy: false, ready: false, loaded: {}, loading: {}, platform: false, locked: false, selectable: false, activePackage: '', apps: [] };
+    const state = { selected: null, selectedRowKeys: [], selectedTables: [], editingRowKey: null, limit: 50, offset: 0, search: '', tableFilter: '', view: 'dashboard', tables: [], database: null, selectedConnectionIndex: 0, connectionDetailTab: 'details', fkPreviewEnabled: false, fkSelectedFields: {}, fkLookupCache: {}, fkPreviewForTable: '', schemaBuilder: { mode: 'table', table: '', timestamps: true, softDeletes: false, createInDatabase: true, saveMigration: false, columns: [], previewCode: '', previewFilename: '' }, queryTable: '', queryColumns: [], querySelectedColumns: [], queryConditions: [], queryRows: [], queryBuilderMode: 'builder', queryPanelTab: 'results', queryLastPayload: null, queryLastExecutedAt: '', queryHistory: [], queryRawSql: '', queryRawResult: null, savedQueries: [], routes: null, routeSearch: '', routeGroup: 'all', selectedRoute: 0, selectedAction: 0, flow: null, flowSearch: '', flowTab: 'flow', flowType: 'all', flowStatus: 'all', flowGroup: 'web', selectedFlow: 0, migrations: null, migrationSearch: '', migrationStatus: 'all', selectedMigration: 0, migrationDetailTab: 'sql', migrationActionMenu: null, patches: null, patchSearch: '', patchStatus: 'all', selectedPatch: 0, patchActionMenu: null, setup: null, setupOptions: { deps: true, frontend: true, seed: false, patch: true }, setupRunning: false, schedule: null, scheduleSearch: '', scheduleStatus: 'all', selectedSchedule: 0, logs: null, logSearch: '', logLevel: 'all', selectedLog: 0, logLive: false, themes: null, themeSearch: '', selectedTheme: 0, users: null, userSearch: '', userStatus: 'all', selectedUser: 0, lastLogin: null, pinker: null, pinkerTab: 'overview', build: null, views: null, viewSearch: '', viewType: 'all', selectedView: 0, viewEditing: false, lang: null, langSearch: '', langScope: 'all', langLocale: 'all', langSyncReference: 'en', selectedLang: 0, langEditing: false, env: null, config: null, configSearch: '', configCategory: 'all', selectedConfig: 0, configEditing: false, busy: false, ready: false, loaded: {}, loading: {}, platform: false, locked: false, selectable: false, activePackage: '', apps: [] };
     const $ = (id) => document.getElementById(id);
     const base = location.pathname.startsWith('/~inspector') ? '/~inspector' : '';
     const packageStorageKey = 'pinx.inspector.package';
@@ -336,6 +336,7 @@
       state.tables = [];
       state.selected = null;
       state.selectedRowKeys = [];
+      state.selectedTables = [];
       state.fkPreviewEnabled = false;
       state.fkSelectedFields = {};
       state.fkLookupCache = {};
@@ -1253,15 +1254,56 @@
       const tables = query ? state.tables.filter(table => String(table.name || '').toLowerCase().includes(query)) : state.tables;
       if (!tables.length) {
         wrap.innerHTML = '<div class="rounded-2xl border border-dashed border-white/10 p-5 text-center text-sm text-slate-500">No tables found.</div>';
+        syncTableListSelection();
         return;
       }
       tables.forEach(table => {
-        const btn = document.createElement('button');
-        btn.className = 'group w-full rounded-xl px-3 py-2.5 text-left transition ' + (table.name === state.selected ? 'bg-violet-500/25 text-white shadow-[0_0_24px_rgba(139,92,246,.16)]' : 'text-slate-300 hover:bg-white/[.05]');
-        btn.innerHTML = '<div class="flex items-center justify-between gap-3"><span class="flex min-w-0 items-center gap-2"><span class="grid h-6 w-6 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/5 text-slate-400">' + icon('table', 'h-3.5 w-3.5') + '</span><strong class="truncate text-sm">' + esc(table.name) + '</strong></span><span class="rounded-lg bg-white/10 px-2 py-0.5 text-xs text-slate-300">' + Number(table.rows || 0).toLocaleString() + '</span></div>';
-        btn.onclick = () => { selectInspectorTable(table.name); renderTableListModern($('tables')); renderTableListModern($('tablesDb')); };
-        wrap.appendChild(btn);
+        const row = document.createElement('div');
+        const checked = (state.selectedTables || []).includes(table.name);
+        const active = table.name === state.selected;
+        row.className = 'group flex items-start gap-2 rounded-xl px-2 py-2 transition ' + (active ? 'bg-violet-500/25 text-white shadow-[0_0_24px_rgba(139,92,246,.16)]' : 'text-slate-300 hover:bg-white/[.05]');
+        row.innerHTML = '<input type="checkbox" class="table-list-checkbox mt-1.5 h-3.5 w-3.5 shrink-0 rounded border-slate-600 bg-black/30 text-violet-500 focus:ring-violet-400" data-table="' + esc(table.name) + '" ' + (checked ? 'checked' : '') + '>'
+          + '<button type="button" class="min-w-0 flex-1 text-left">'
+          + '<div class="flex items-center justify-between gap-3"><span class="flex min-w-0 items-center gap-2"><span class="grid h-6 w-6 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/5 text-slate-400">' + icon('table', 'h-3.5 w-3.5') + '</span><strong class="truncate text-sm">' + esc(table.name) + '</strong></span><span class="rounded-lg bg-white/10 px-2 py-0.5 text-xs text-slate-300">' + Number(table.rows || 0).toLocaleString() + '</span></div>'
+          + '</button>';
+        const checkbox = row.querySelector('.table-list-checkbox');
+        const button = row.querySelector('button');
+        checkbox.addEventListener('click', (event) => event.stopPropagation());
+        checkbox.addEventListener('change', () => syncTableListSelection());
+        button.addEventListener('click', () => {
+          selectInspectorTable(table.name);
+          renderTableListModern($('tables'));
+          renderTableListModern($('tablesDb'));
+        });
+        wrap.appendChild(row);
       });
+      syncTableListSelection();
+    }
+
+    function syncTableListSelection() {
+      state.selectedTables = Array.from(document.querySelectorAll('.table-list-checkbox:checked'))
+        .map(input => input.dataset.table || '')
+        .filter(Boolean);
+      const count = state.selectedTables.length;
+      ['emptySelectedTablesBtn', 'dropSelectedTablesBtn'].forEach((id) => {
+        const button = $(id);
+        if (!button) return;
+        button.disabled = count === 0;
+        button.classList.toggle('opacity-50', count === 0);
+      });
+      const selectAll = $('tableListSelectAll');
+      if (selectAll) {
+        const visible = Array.from(document.querySelectorAll('.table-list-checkbox'));
+        selectAll.checked = visible.length > 0 && visible.every(input => input.checked);
+        selectAll.indeterminate = visible.some(input => input.checked) && !selectAll.checked;
+      }
+    }
+
+    function toggleAllTableListSelection(checked) {
+      document.querySelectorAll('.table-list-checkbox').forEach((input) => {
+        input.checked = !!checked;
+      });
+      syncTableListSelection();
     }
 
     function selectInspectorTable(name) {
@@ -1506,6 +1548,14 @@
       tablePanel.querySelectorAll('.fk-preview-field').forEach((input) => {
         input.onchange = () => toggleFkPreviewField(input.dataset.fkColumn || '', input.dataset.fkField || '', input.checked);
       });
+      tablePanel.querySelectorAll('.table-data-row').forEach((row) => {
+        row.addEventListener('dblclick', (event) => {
+          if (event.target.closest('button, input, a, .fk-cell-btn, label')) return;
+          const key = row.dataset.rowKey || '';
+          const index = Number(row.dataset.rowIndex ?? -1);
+          openEditRowForm(key, index);
+        });
+      });
     }
 
     function tableWorkspaceHtml(payload, columns, rowHeaders) {
@@ -1514,10 +1564,17 @@
       const previewColumns = selectedFkPreviewColumns(payload);
       const primary = payload.primary_key || '';
       const colSpan = visibleHeaders.length + previewColumns.length + 2;
-      const dataRows = rows.map((row) => {
+      const dataRows = rows.map((row, rowIndex) => {
         const key = primary ? row[primary] : '';
         const disabled = key === undefined || key === null || key === '';
-        return '<tr class="border-t border-white/10 hover:bg-white/[.035]"><td class="w-12 px-4 py-3"><input type="checkbox" class="table-row-checkbox h-4 w-4 rounded border-slate-600 bg-black/30 text-violet-500 focus:ring-violet-400" data-key="' + esc(key ?? '') + '" ' + (disabled ? 'disabled title="This row has no primary key value"' : '') + ' onchange="syncTableSelection()"></td>' + visibleHeaders.map(header => browseCellHtml(payload, row, header)).join('') + previewColumns.map(preview => previewCellHtml(preview, row, payload)).join('') + '<td class="w-24 px-4 py-3 text-right"><button type="button" data-table-delete-key="' + esc(key ?? '') + '" ' + (disabled ? 'disabled' : '') + ' class="table-row-delete-btn rounded-lg border border-rose-300/20 bg-rose-500/10 px-2.5 py-1.5 text-xs font-bold text-rose-200 hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-40">Delete</button></td></tr>';
+        return '<tr class="table-data-row border-t border-white/10 hover:bg-white/[.035]" data-row-index="' + rowIndex + '" data-row-key="' + esc(key ?? '') + '" title="Double-click to edit">'
+          + '<td class="w-12 px-4 py-3"><input type="checkbox" class="table-row-checkbox h-4 w-4 rounded border-slate-600 bg-black/30 text-violet-500 focus:ring-violet-400" data-key="' + esc(key ?? '') + '" ' + (disabled ? 'disabled title="This row has no primary key value"' : '') + ' onchange="syncTableSelection()"></td>'
+          + visibleHeaders.map(header => browseCellHtml(payload, row, header)).join('')
+          + previewColumns.map(preview => previewCellHtml(preview, row, payload)).join('')
+          + '<td class="w-36 px-4 py-3 text-right"><div class="inline-flex gap-1.5">'
+          + '<button type="button" data-table-edit-key="' + esc(key ?? '') + '" data-row-index="' + rowIndex + '" ' + (disabled ? 'disabled' : '') + ' class="table-row-edit-btn rounded-lg border border-sky-300/20 bg-sky-500/10 px-2.5 py-1.5 text-xs font-bold text-sky-100 hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-40">Edit</button>'
+          + '<button type="button" data-table-delete-key="' + esc(key ?? '') + '" ' + (disabled ? 'disabled' : '') + ' class="table-row-delete-btn rounded-lg border border-rose-300/20 bg-rose-500/10 px-2.5 py-1.5 text-xs font-bold text-rose-200 hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-40">Delete</button>'
+          + '</div></td></tr>';
       }).join('');
       const breadcrumb = $('tableBreadcrumb');
       if (breadcrumb) {
@@ -1592,6 +1649,7 @@
         return;
       }
 
+      state.editingRowKey = null;
       panel.classList.remove('hidden');
       panel.innerHTML = `
         <form id="newRowForm" onsubmit="event.preventDefault(); saveNewRow();" class="rounded-3xl border border-violet-300/20 bg-violet-500/10 p-4 shadow-[0_18px_70px_rgba(0,0,0,.22)]">
@@ -1603,7 +1661,7 @@
             <button type="button" onclick="closeNewRowForm()" class="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm font-bold text-slate-300 hover:bg-white/10">Close</button>
           </div>
           <div class="grid grid-cols-2 gap-3 max-lg:grid-cols-1">
-            ${columns.map(([name, column]) => newRowField(name, column, payload.primary_key)).join('')}
+            ${columns.map(([name, column]) => rowFormField(name, column, payload.primary_key)).join('')}
           </div>
           <div class="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-4">
             <div class="text-xs leading-relaxed text-slate-500">Values are written to the active connection. DevDB JSON writes use file locking and sequences.</div>
@@ -1617,35 +1675,103 @@
       panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
 
+    function findTableRowByKey(key, rowIndex = -1) {
+      const payload = state.tablePayload || {};
+      const rows = payload.rows || [];
+      if (rowIndex >= 0 && rows[rowIndex]) return rows[rowIndex];
+      const primary = payload.primary_key || '';
+      if (!primary) return null;
+      return rows.find(row => String(row?.[primary] ?? '') === String(key ?? '')) || null;
+    }
+
+    function openEditRowForm(key, rowIndex = -1) {
+      const payload = state.tablePayload || {};
+      const panel = $('newRowPanel');
+      if (!panel) return;
+      if (!payload.primary_key) {
+        showOperation('warn', 'No primary key', 'This table has no primary key, so rows cannot be edited safely.');
+        return;
+      }
+      if (key === undefined || key === null || key === '') {
+        showOperation('warn', 'Missing row key', 'This row has no primary key value.');
+        return;
+      }
+      const row = findTableRowByKey(key, rowIndex);
+      if (!row) {
+        showOperation('warn', 'Row not found', 'Inspector could not load this row for editing.');
+        return;
+      }
+      const columns = Object.entries(payload.columns || {});
+      if (!columns.length) {
+        showOperation('warn', 'No columns found', 'Inspector could not read a schema for this table.');
+        return;
+      }
+
+      state.editingRowKey = key;
+      panel.classList.remove('hidden');
+      panel.innerHTML = `
+        <form id="editRowForm" onsubmit="event.preventDefault(); saveEditRow();" class="rounded-3xl border border-sky-300/20 bg-sky-500/10 p-4 shadow-[0_18px_70px_rgba(0,0,0,.22)]">
+          <div class="mb-4 flex items-start justify-between gap-3">
+            <div>
+              <div class="text-lg font-black text-white">Edit row in ${esc(payload.table || 'table')}</div>
+              <div class="mt-1 text-sm text-slate-400">Primary key <code class="rounded bg-black/30 px-1.5 py-0.5 text-sky-100">${esc(payload.primary_key)} = ${esc(key)}</code>. Double-click any row to open this editor.</div>
+            </div>
+            <button type="button" onclick="closeNewRowForm()" class="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm font-bold text-slate-300 hover:bg-white/10">Close</button>
+          </div>
+          <div class="grid grid-cols-2 gap-3 max-lg:grid-cols-1">
+            ${columns.map(([name, column]) => rowFormField(name, column, payload.primary_key, row[name], true)).join('')}
+          </div>
+          <div class="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-4">
+            <div class="text-xs leading-relaxed text-slate-500">Saving updates the selected row by primary key on the active connection.</div>
+            <div class="flex gap-2">
+              <button type="button" onclick="closeNewRowForm()" class="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-bold text-slate-300 hover:bg-white/10">Cancel</button>
+              <button type="submit" class="rounded-xl bg-sky-500 px-4 py-2 text-sm font-bold text-slate-950 hover:bg-sky-400">Save Changes</button>
+            </div>
+          </div>
+        </form>
+      `;
+      panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
     function closeNewRowForm() {
       const panel = $('newRowPanel');
       if (!panel) return;
       panel.classList.add('hidden');
       panel.innerHTML = '';
+      state.editingRowKey = null;
     }
 
-    function newRowField(name, column, primaryKey) {
+    function rowFormField(name, column, primaryKey, value = '', editing = false) {
       const type = String(column?.type || '').toLowerCase();
       const isPrimary = name === primaryKey || column?.primary;
       const nullable = !!column?.nullable;
       const auto = isPrimary && type.includes('int');
-      const placeholder = auto ? 'Auto' : (column?.default !== undefined && column?.default !== null ? 'Default: ' + column.default : '');
+      const placeholder = auto && !editing ? 'Auto' : (column?.default !== undefined && column?.default !== null ? 'Default: ' + column.default : '');
       const inputType = type.includes('int') || type.includes('decimal') || type.includes('float') || type.includes('double') ? 'number'
         : type.includes('date') || type.includes('time') ? 'text'
           : 'text';
+      const displayValue = value === null || value === undefined
+        ? ''
+        : (typeof value === 'object' ? JSON.stringify(value) : String(value));
+      const readonly = editing && isPrimary;
       return `
         <label class="rounded-2xl border border-white/10 bg-black/20 p-3">
           <div class="flex items-center justify-between gap-3">
             <span class="font-bold text-slate-100">${esc(name)}</span>
             <span class="rounded-lg bg-white/10 px-2 py-0.5 text-[11px] font-bold uppercase text-slate-400">${esc(type || 'value')}</span>
           </div>
-          <input name="${esc(name)}" type="${inputType}" ${auto ? '' : ''} placeholder="${esc(placeholder)}" class="mt-3 h-10 w-full rounded-xl border border-white/10 bg-[#06101c] px-3 text-sm text-slate-100 outline-none focus:border-violet-300">
+          <input name="${esc(name)}" type="${inputType}" value="${esc(displayValue)}" ${readonly ? 'readonly' : ''} placeholder="${esc(placeholder)}" class="mt-3 h-10 w-full rounded-xl border border-white/10 bg-[#06101c] px-3 text-sm text-slate-100 outline-none focus:border-violet-300 ${readonly ? 'opacity-70' : ''}">
           <div class="mt-2 flex flex-wrap gap-2 text-[11px] text-slate-500">
             ${isPrimary ? '<span class="rounded bg-amber-400/10 px-2 py-0.5 text-amber-200">primary</span>' : ''}
+            ${readonly ? '<span class="rounded bg-slate-400/10 px-2 py-0.5 text-slate-300">locked</span>' : ''}
             ${nullable ? '<span class="rounded bg-sky-400/10 px-2 py-0.5 text-sky-200">nullable</span>' : '<span class="rounded bg-white/5 px-2 py-0.5">required by schema</span>'}
           </div>
         </label>
       `;
+    }
+
+    function newRowField(name, column, primaryKey) {
+      return rowFormField(name, column, primaryKey);
     }
 
     async function saveNewRow() {
@@ -1661,9 +1787,27 @@
         }
         closeNewRowForm();
         state.offset = 0;
-        await loadTables();
+        await loadTables({ autoOpen: false });
         await loadTable();
       }, 'New row was added.');
+    }
+
+    async function saveEditRow() {
+      const payload = state.tablePayload || {};
+      const form = $('editRowForm');
+      const key = state.editingRowKey;
+      if (!form || !payload.table || key === null || key === undefined || key === '') return;
+      const values = {};
+      new FormData(form).forEach((value, field) => { values[field] = value; });
+      await runWithLoading('Updating row', 'Saving changes to ' + payload.table + '.', async () => {
+        const result = await post('/api/table/update', { table: payload.table, key, values });
+        if (result.error || result.ok === false) {
+          throw new Error(result.message || 'The row could not be updated.');
+        }
+        closeNewRowForm();
+        await loadTables({ autoOpen: false });
+        await loadTable();
+      }, 'Row was updated.');
     }
 
     function applySearch() { state.search = $('databaseContent').querySelector('#search').value || ''; state.offset = 0; loadTable(); }
@@ -1715,22 +1859,45 @@
         showOperation('warn', 'No table selected', 'Open a table first.');
         return;
       }
+      await emptyTables([payload.table]);
+    }
+
+    async function emptySelectedTables() {
+      const tables = [...(state.selectedTables || [])];
+      if (!tables.length) {
+        showOperation('warn', 'No tables selected', 'Tick one or more tables in the list first.');
+        return;
+      }
+      await emptyTables(tables);
+    }
+
+    async function emptyTables(tables) {
+      tables = (tables || []).filter(Boolean);
+      if (!tables.length) return;
+      const label = tables.length === 1 ? tables[0] : tables.length + ' tables';
       const ok = await askConfirm(
-        'Empty table?',
-        `This will delete all rows from ${payload.table}. The table structure stays.`,
+        tables.length === 1 ? 'Empty table?' : 'Empty selected tables?',
+        tables.length === 1
+          ? `This will delete all rows from ${tables[0]}. The table structure stays.`
+          : `This will delete all rows from ${tables.length} tables:\n${tables.join(', ')}`,
         'warn'
       );
       if (!ok) return;
-      await runWithLoading('Emptying table', 'Removing all rows from ' + payload.table + '.', async () => {
-        const result = await post('/api/table/empty', { table: payload.table });
+      await runWithLoading('Emptying table(s)', 'Removing all rows from ' + label + '.', async () => {
+        const result = await post('/api/table/empty', { tables });
         if (result.error || result.ok === false) {
-          throw new Error(result.message || 'Table could not be emptied.');
+          throw new Error(result.message || 'Table(s) could not be emptied.');
         }
         state.offset = 0;
         state.selectedRowKeys = [];
-        await loadTables();
-        await loadTable();
-      }, 'Table was emptied.');
+        state.selectedTables = [];
+        await loadTables({ autoOpen: false });
+        if (state.selected && tables.includes(state.selected)) {
+          await loadTable();
+        } else if (state.view === 'database') {
+          await openDefaultTableWorkspace();
+        }
+      }, tables.length === 1 ? 'Table was emptied.' : tables.length + ' tables were emptied.');
     }
 
     async function dropCurrentTable() {
@@ -1739,35 +1906,51 @@
         showOperation('warn', 'No table selected', 'Open a table first.');
         return;
       }
-      const tableName = payload.table;
+      await dropTables([payload.table]);
+    }
+
+    async function dropSelectedTables() {
+      const tables = [...(state.selectedTables || [])];
+      if (!tables.length) {
+        showOperation('warn', 'No tables selected', 'Tick one or more tables in the list first.');
+        return;
+      }
+      await dropTables(tables);
+    }
+
+    async function dropTables(tables) {
+      tables = (tables || []).filter(Boolean);
+      if (!tables.length) return;
+      const label = tables.length === 1 ? tables[0] : tables.length + ' tables';
       const ok = await askConfirm(
-        'Drop table?',
-        `This permanently deletes table ${tableName} and all of its data.`,
+        tables.length === 1 ? 'Drop table?' : 'Drop selected tables?',
+        tables.length === 1
+          ? `This permanently deletes table ${tables[0]} and all of its data.`
+          : `This permanently deletes ${tables.length} tables and all of their data:\n${tables.join(', ')}`,
         'danger'
       );
       if (!ok) return;
-      await runWithLoading('Dropping table', 'Removing table ' + tableName + ' from the database.', async () => {
-        const result = await post('/api/table/drop', { table: tableName });
+      await runWithLoading('Dropping table(s)', 'Removing ' + label + ' from the database.', async () => {
+        const result = await post('/api/table/drop', { tables });
         if (result.error || result.ok === false) {
-          throw new Error(result.message || 'Table could not be dropped.');
+          throw new Error(result.message || 'Table(s) could not be dropped.');
         }
-        state.selected = null;
-        state.tablePayload = null;
+        const dropped = new Set(tables);
+        if (state.selected && dropped.has(state.selected)) {
+          state.selected = null;
+          state.tablePayload = null;
+          state.fkLookupCache = {};
+          state.fkSelectedFields = {};
+          state.fkPreviewForTable = '';
+        }
         state.selectedRowKeys = [];
-        state.fkLookupCache = {};
-        state.fkSelectedFields = {};
-        state.fkPreviewForTable = '';
+        state.selectedTables = [];
         state.offset = 0;
-        await loadTables();
-        const breadcrumb = $('tableBreadcrumb');
-        if (breadcrumb) {
-          breadcrumb.classList.add('hidden');
-          breadcrumb.classList.remove('flex');
+        await loadTables({ autoOpen: false });
+        if (state.view === 'database') {
+          await openDefaultTableWorkspace();
         }
-        if ($('databaseContent')) {
-          $('databaseContent').innerHTML = '<div class="grid min-h-[420px] place-items-center p-8 text-center text-slate-500"><div><div class="text-lg font-bold text-slate-300">Table dropped</div><div class="mt-2 text-sm">Select another table from the list to continue.</div></div></div>';
-        }
-      }, 'Table was dropped.');
+      }, tables.length === 1 ? 'Table was dropped.' : tables.length + ' tables were dropped.');
     }
 
     function schemaColumnTypes() {
@@ -4898,6 +5081,13 @@
         event.stopPropagation();
         const key = rowDeleteButton.dataset.tableDeleteKey || '';
         deleteTableRows(key ? [key] : []);
+        return;
+      }
+      const rowEditButton = event.target.closest?.('.table-row-edit-btn');
+      if (rowEditButton) {
+        event.preventDefault();
+        event.stopPropagation();
+        openEditRowForm(rowEditButton.dataset.tableEditKey || '', Number(rowEditButton.dataset.rowIndex ?? -1));
         return;
       }
       const fkCellButton = event.target.closest?.('.fk-cell-btn');

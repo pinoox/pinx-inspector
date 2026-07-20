@@ -21,10 +21,14 @@
               <button onclick="renderTableList($('tablesDb'))" title="Refresh tables" class="ux-btn grid w-11 place-items-center px-0"><?= inspector_icon('refresh-cw') ?></button>
             </div>
             <div class="mb-3 flex items-center justify-between px-1 text-xs text-slate-500">
-              <span>Tables</span>
+              <label class="inline-flex items-center gap-2"><input id="tableListSelectAll" type="checkbox" class="h-3.5 w-3.5 rounded border-slate-600 bg-black/30 text-violet-500" onchange="toggleAllTableListSelection(this.checked)"><span>Tables</span></label>
               <span id="tableCountDb" class="rounded-full bg-white/10 px-2 py-0.5 text-slate-300"></span>
             </div>
-            <div id="tablesDb" class="max-h-[560px] space-y-1 overflow-auto pr-1"></div>
+            <div id="tableBulkActions" class="mb-3 flex gap-2">
+              <button id="emptySelectedTablesBtn" onclick="emptySelectedTables()" disabled class="flex-1 rounded-xl border border-amber-300/25 bg-amber-500/10 px-2 py-1.5 text-xs font-bold text-amber-100 opacity-50 hover:bg-amber-500/20 disabled:cursor-not-allowed">Empty</button>
+              <button id="dropSelectedTablesBtn" onclick="dropSelectedTables()" disabled class="flex-1 rounded-xl border border-rose-300/30 bg-rose-500/15 px-2 py-1.5 text-xs font-bold text-rose-100 opacity-50 hover:bg-rose-500/25 disabled:cursor-not-allowed">Drop</button>
+            </div>
+            <div id="tablesDb" class="max-h-[520px] space-y-1 overflow-auto pr-1"></div>
             <div class="ux-helper mt-4">Schema comes from migrations. Use this page for local inspection and development data, not production administration.</div>
           </aside>
           <div id="databaseContent" class="ux-panel min-h-[680px] text-slate-400">
