@@ -137,6 +137,11 @@ try {
         return;
     }
 
+    if ($path === '/api/patches') {
+        json_response(patches_payload($root));
+        return;
+    }
+
     if ($path === '/api/routes') {
         json_response(routes_payload($root));
         return;
@@ -350,7 +355,22 @@ try {
 
         $payload = json_decode((string) file_get_contents('php://input'), true);
         $action = is_array($payload) ? (string) ($payload['action'] ?? '') : '';
-        json_response(inspector_action_payload($root, $action));
+        $extraArgs = [];
+        if (is_array($payload)) {
+            if (isset($payload['step']) && is_numeric($payload['step'])) {
+                $extraArgs[] = '--step=' . max(1, (int) $payload['step']);
+            }
+            if (!empty($payload['all'])) {
+                $extraArgs[] = '--all';
+            }
+            if (!empty($payload['force'])) {
+                $extraArgs[] = '--force';
+            }
+            if (!empty($payload['clear'])) {
+                $extraArgs[] = '--clear';
+            }
+        }
+        json_response(inspector_action_payload($root, $action, $extraArgs));
         return;
     }
 
@@ -2271,6 +2291,13 @@ function cli_actions(): array
         ['id' => 'deps_status', 'label' => 'Dependencies', 'description' => 'Check dependency status', 'command' => 'deps:status'],
         ['id' => 'migrate', 'label' => 'Run Migrate', 'description' => 'Run app and platform migrations', 'command' => 'migrate --platform'],
         ['id' => 'migrate_rollback', 'label' => 'Rollback Migrations', 'description' => 'Rollback the last app migration batch', 'command' => 'migrate:rollback'],
+        ['id' => 'migrate_reset', 'label' => 'Reset Migrations', 'description' => 'Rollback all migration batches via down()', 'command' => 'migrate:reset --force'],
+        ['id' => 'migrate_drop', 'label' => 'Drop Migration Tables', 'description' => 'Drop package tables and clear migration history', 'command' => 'migrate:drop --force'],
+        ['id' => 'migrate_fresh', 'label' => 'Fresh Migrations', 'description' => 'Drop tables then re-run migrations', 'command' => 'migrate:fresh --force'],
+        ['id' => 'patch_status', 'label' => 'Patches', 'description' => 'Show patch status', 'command' => 'patch:status'],
+        ['id' => 'patch_run', 'label' => 'Run Patches', 'description' => 'Run pending data patches', 'command' => 'patch:run'],
+        ['id' => 'patch_rollback', 'label' => 'Rollback Patches', 'description' => 'Rollback the latest rollbackable patch', 'command' => 'patch:rollback'],
+        ['id' => 'patch_reset', 'label' => 'Reset Patches', 'description' => 'Rollback all rollbackable patches', 'command' => 'patch:reset --force'],
     ];
 }
 
@@ -2296,6 +2323,13 @@ function run_cli_action(string $root, string $action, array $extraArgs = []): ar
         'deps_status' => ['deps:status', '--no-ansi'],
         'migrate' => ['migrate', '--platform', '--no-ansi'],
         'migrate_rollback' => ['migrate:rollback', '--no-ansi'],
+        'migrate_reset' => ['migrate:reset', '--force', '--no-ansi'],
+        'migrate_drop' => ['migrate:drop', '--force', '--no-ansi'],
+        'migrate_fresh' => ['migrate:fresh', '--force', '--no-ansi'],
+        'patch_status' => ['patch:status', '--no-ansi'],
+        'patch_run' => ['patch:run', '--no-ansi'],
+        'patch_rollback' => ['patch:rollback', '--no-ansi'],
+        'patch_reset' => ['patch:reset', '--force', '--no-ansi'],
         'user_list' => ['user:list', '--json', '-n', '--no-ansi'],
         'user_login' => ['user:login', '--json', '-n', '--no-ansi'],
         'user_logout' => ['user:logout', '--json', '-n', '--no-ansi'],
@@ -2379,14 +2413,19 @@ function health_payload(string $root): array
     ];
 }
 
-function inspector_action_payload(string $root, string $action): array
+function inspector_action_payload(string $root, string $action, array $extraArgs = []): array
 {
-    $allowed = ['doctor', 'migrate', 'migrate_rollback', 'migrate_status', 'routes', 'devdb_status', 'deps_status', 'pinker_status', 'pinker_rebuild', 'pinker_clear', 'build', 'build_sign', 'release_patch', 'schedule_list', 'schedule_run'];
+    $allowed = [
+        'doctor', 'migrate', 'migrate_rollback', 'migrate_reset', 'migrate_drop', 'migrate_fresh', 'migrate_status',
+        'patch_status', 'patch_run', 'patch_rollback', 'patch_reset',
+        'routes', 'devdb_status', 'deps_status', 'pinker_status', 'pinker_rebuild', 'pinker_clear',
+        'build', 'build_sign', 'release_patch', 'schedule_list', 'schedule_run',
+    ];
     if (!in_array($action, $allowed, true)) {
         throw new RuntimeException('Unknown Inspector action.');
     }
 
-    $result = run_cli_action($root, $action);
+    $result = run_cli_action($root, $action, $extraArgs);
     $stdout = trim((string) ($result['stdout'] ?? ''));
     $stderr = trim((string) ($result['stderr'] ?? ''));
 
@@ -2411,7 +2450,14 @@ function inspector_action_title(string $action): string
         'doctor' => 'Health check finished',
         'migrate' => 'Migration run finished',
         'migrate_rollback' => 'Migration rollback finished',
+        'migrate_reset' => 'Migration reset finished',
+        'migrate_drop' => 'Migration tables dropped',
+        'migrate_fresh' => 'Fresh migration finished',
         'migrate_status' => 'Migration status refreshed',
+        'patch_status' => 'Patch status refreshed',
+        'patch_run' => 'Patch run finished',
+        'patch_rollback' => 'Patch rollback finished',
+        'patch_reset' => 'Patch reset finished',
         'routes' => 'Route map refreshed',
         'devdb_status' => 'DevDB status refreshed',
         'deps_status' => 'Dependency check finished',
@@ -2436,9 +2482,16 @@ function inspector_action_message(string $action, bool $ok, string $stdout, stri
     return match ($action) {
         'doctor' => 'Your project health checks were refreshed.',
         'migrate' => 'Migrations were executed. Schema, tables, and Inspector views are ready to refresh.',
-        'migrate_rollback' => 'The latest migration batch was rolled back. Refresh Inspector views to see the current schema.',
+        'migrate_rollback' => 'Migration batch(es) were rolled back. Refresh Inspector views to see the current schema.',
+        'migrate_reset' => 'All migration batches were rolled back via down().',
+        'migrate_drop' => 'Package tables were dropped and migration history was cleared.',
+        'migrate_fresh' => 'Tables were dropped and migrations were re-run from scratch.',
         'routes' => 'Routes were scanned and grouped for Inspector.',
         'migrate_status' => 'Migration timeline was refreshed.',
+        'patch_status' => 'Patch timeline was refreshed.',
+        'patch_run' => 'Pending data patches were executed.',
+        'patch_rollback' => 'Patch rollback finished. Refresh the Patches page to see the current state.',
+        'patch_reset' => 'Rollbackable patches were reset.',
         'pinker_rebuild' => 'Pinker cache was rebuilt from the app manifest and route files.',
         'pinker_clear' => 'Pinker cache clear command finished.',
         'build' => 'The .pinx package build command finished. Check the Build & Release page for release files.',
@@ -2558,6 +2611,235 @@ function migrations_payload(string $root): array
         'message' => $items === [] ? 'No migration information was found yet.' : 'Migration state is ready.',
         'raw' => $status,
     ];
+}
+
+function patches_payload(string $root): array
+{
+    $status = command_payload($root, 'patch_status');
+    $records = patch_records_payload($root);
+    $files = patch_files_payload($root);
+    $items = [];
+    $seen = [];
+
+    foreach ($records as $record) {
+        if (!is_array($record)) {
+            continue;
+        }
+
+        $name = (string) ($record['migration'] ?? $record['name'] ?? '');
+        if ($name === '') {
+            continue;
+        }
+
+        $file = patch_file_for_name($files, $name);
+        $recordStatus = strtolower((string) ($record['status'] ?? 'success'));
+        $items[] = patch_item_payload($name, $file, [
+            'package' => (string) ($record['package'] ?? 'app'),
+            'batch' => (int) ($record['batch'] ?? 0),
+            'status' => $recordStatus === 'success' ? 'ran' : ($recordStatus === 'failed' ? 'failed' : $recordStatus),
+            'ran_at' => (string) ($record['created_at'] ?? $record['executed_at'] ?? ''),
+            'can_rollback' => (bool) ($file['can_rollback'] ?? false),
+            'description' => (string) ($file['description'] ?? ''),
+        ]);
+        $seen[migration_key($name)] = true;
+    }
+
+    foreach ($files as $file) {
+        $name = (string) ($file['patch'] ?? pathinfo((string) ($file['name'] ?? ''), PATHINFO_FILENAME));
+        $key = migration_key($name);
+        if (isset($seen[$key])) {
+            continue;
+        }
+        $seen[$key] = true;
+        $items[] = patch_item_payload($name, $file, [
+            'package' => (string) ($file['scope'] ?? 'app'),
+            'batch' => null,
+            'status' => 'pending',
+            'ran_at' => '',
+            'can_rollback' => (bool) ($file['can_rollback'] ?? false),
+            'description' => (string) ($file['description'] ?? ''),
+        ]);
+    }
+
+    usort($items, static function (array $a, array $b): int {
+        $statusRank = ['pending' => 0, 'failed' => 1, 'ran' => 2, 'rolled_back' => 3, 'skipped' => 4];
+        $rank = ($statusRank[(string) ($a['status'] ?? '')] ?? 9) <=> ($statusRank[(string) ($b['status'] ?? '')] ?? 9);
+        return $rank !== 0 ? $rank : strcmp((string) ($b['name'] ?? ''), (string) ($a['name'] ?? ''));
+    });
+
+    $ran = count(array_filter($items, static fn (array $item): bool => ($item['status'] ?? '') === 'ran'));
+    $failed = count(array_filter($items, static fn (array $item): bool => ($item['status'] ?? '') === 'failed'));
+
+    return [
+        'ok' => (bool) ($status['ok'] ?? true),
+        'summary' => [
+            'total' => count($items),
+            'ran' => $ran,
+            'pending' => count(array_filter($items, static fn (array $item): bool => ($item['status'] ?? '') === 'pending')),
+            'failed' => $failed,
+            'rollbackable' => count(array_filter($items, static fn (array $item): bool => !empty($item['can_rollback']) && ($item['status'] ?? '') === 'ran')),
+        ],
+        'items' => $items,
+        'message' => $items === [] ? 'No patch files were found yet.' : 'Patch state is ready.',
+        'raw' => $status,
+    ];
+}
+
+function patch_sources(string $root): array
+{
+    $paths = [
+        ['scope' => 'app', 'path' => $root . '/patches'],
+        ['scope' => 'app', 'path' => $root . '/database/patches'],
+        ['scope' => 'app', 'path' => $root . '/Database/patches'],
+    ];
+
+    $pincore = '';
+    foreach ([
+        $root . '/vendor/pinoox/pincore',
+        dirname($root) . '/vendor/pinoox/pincore',
+        dirname($root, 2) . '/pincore',
+    ] as $candidate) {
+        if (is_dir($candidate)) {
+            $pincore = $candidate;
+            break;
+        }
+    }
+
+    if ($pincore !== '') {
+        $paths[] = ['scope' => 'platform', 'path' => $pincore . '/patches'];
+    }
+
+    return $paths;
+}
+
+function patch_files_payload(string $root): array
+{
+    $files = [];
+    $seenFiles = [];
+
+    foreach (patch_sources($root) as $source) {
+        $path = (string) ($source['path'] ?? '');
+        if (!is_dir($path)) {
+            continue;
+        }
+
+        foreach (glob($path . '/*.php') ?: [] as $file) {
+            $real = realpath($file);
+            $key = $real !== false ? strtolower($real) : strtolower(normalize_path($file));
+            if (isset($seenFiles[$key])) {
+                continue;
+            }
+            $seenFiles[$key] = true;
+
+            $content = (string) file_get_contents($file);
+            $relative = ltrim(str_replace(normalize_path($root), '', normalize_path($file)), '/');
+            $files[] = [
+                'name' => basename($file),
+                'patch' => pathinfo($file, PATHINFO_FILENAME),
+                'scope' => (string) ($source['scope'] ?? 'app'),
+                'path' => $relative,
+                'absolute_path' => normalize_path($file),
+                'size' => filesize($file) ?: 0,
+                'size_label' => format_bytes(filesize($file) ?: 0),
+                'lines' => substr_count($content, "\n") + 1,
+                'modified_at' => date(DATE_ATOM, filemtime($file) ?: time()),
+                'modified_at_label' => readable_datetime(date(DATE_ATOM, filemtime($file) ?: time())),
+                'can_rollback' => (bool) preg_match('/function\s+canRollback\s*\([^)]*\)\s*(?::\s*[^{]+)?\{[^}]*return\s+true/i', $content)
+                    || (bool) preg_match('/function\s+down\s*\([^)]*\)\s*(?::\s*[^{]+)?\{(?!\s*\})/i', $content),
+                'description' => patch_description_from_content($content),
+                'content' => substr($content, 0, 18000),
+                'truncated' => strlen($content) > 18000,
+            ];
+        }
+    }
+
+    return $files;
+}
+
+function patch_description_from_content(string $content): string
+{
+    if (preg_match('/function\s+description\s*\([^)]*\)\s*(?::\s*[^{]+)?\{[^}]*return\s+[\'"]([^\'"]+)[\'"]/i', $content, $matches)) {
+        return (string) $matches[1];
+    }
+
+    return '';
+}
+
+function patch_file_for_name(array $files, string $name): ?array
+{
+    $needle = migration_key($name);
+    foreach ($files as $file) {
+        $candidate = migration_key((string) ($file['patch'] ?? pathinfo((string) ($file['name'] ?? ''), PATHINFO_FILENAME)));
+        if ($candidate === $needle || str_ends_with($candidate, '_' . $needle) || str_ends_with($needle, '_' . $candidate)) {
+            return $file;
+        }
+    }
+
+    return null;
+}
+
+function patch_item_payload(string $name, ?array $file, array $meta): array
+{
+    return [
+        'name' => $name,
+        'file' => (string) ($file['name'] ?? $name),
+        'package' => (string) ($meta['package'] ?? ($file['scope'] ?? 'app')),
+        'batch' => $meta['batch'] ?? null,
+        'status' => (string) ($meta['status'] ?? 'pending'),
+        'ran_at' => (string) ($meta['ran_at'] ?? ''),
+        'ran_at_label' => readable_datetime((string) ($meta['ran_at'] ?? '')),
+        'path' => (string) ($file['path'] ?? ''),
+        'size_label' => (string) ($file['size_label'] ?? ''),
+        'lines' => $file['lines'] ?? null,
+        'modified_at_label' => (string) ($file['modified_at_label'] ?? ''),
+        'can_rollback' => (bool) ($meta['can_rollback'] ?? ($file['can_rollback'] ?? false)),
+        'description' => (string) ($meta['description'] ?? ($file['description'] ?? '')),
+        'content' => (string) ($file['content'] ?? ''),
+    ];
+}
+
+function patch_records_payload(string $root): array
+{
+    try {
+        $tables = tables_payload($root)['tables'] ?? [];
+        $history = null;
+        foreach ($tables as $table) {
+            $name = (string) ($table['name'] ?? '');
+            if (in_array(strtolower($name), ['history', 'pinx_history', 'platform_history'], true) || str_ends_with(strtolower($name), '_history')) {
+                $history = $name;
+                break;
+            }
+        }
+
+        if ($history === null) {
+            return [];
+        }
+
+        $payload = table_payload($root, $history, 1000, 0);
+        $records = [];
+        foreach (($payload['rows'] ?? []) as $row) {
+            if (!is_array($row) || (string) ($row['type'] ?? '') !== 'patch') {
+                continue;
+            }
+
+            $status = strtolower((string) ($row['status'] ?? 'success'));
+            if ($status !== '' && !in_array($status, ['success', 'failed'], true)) {
+                continue;
+            }
+
+            $records[] = [
+                'migration' => (string) ($row['migration'] ?? ''),
+                'package' => (string) ($row['app'] ?? 'app'),
+                'batch' => (int) ($row['batch'] ?? 0),
+                'status' => $status !== '' ? $status : 'success',
+                'created_at' => (string) ($row['executed_at'] ?? ''),
+            ];
+        }
+
+        return $records;
+    } catch (Throwable) {
+        return [];
+    }
 }
 
 function migration_files_payload(string $root): array

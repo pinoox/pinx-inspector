@@ -12,6 +12,7 @@
       <?= inspector_view('pages/query.php') ?>
       <?= inspector_view('pages/health.php') ?>
       <?= inspector_view('pages/migrations.php') ?>
+      <?= inspector_view('pages/patches.php') ?>
       <?= inspector_view('pages/routes.php') ?>
       <?= inspector_view('pages/users.php') ?>
       <?= inspector_view('pages/flow.php') ?>

@@ -5,7 +5,7 @@
               <div>
                 <div class="ux-page-kicker">Database / Schema</div>
                 <div class="flex items-center gap-3"><h2 class="ux-page-title">Migrations</h2><span id="migrationsTotalBadge" class="rounded-xl bg-violet-400/20 px-3 py-1 text-sm font-bold text-violet-200">0</span></div>
-                <p class="ux-page-copy">Review migration status, preview schema changes, and run pending migrations from one focused workspace.</p>
+                <p class="ux-page-copy">Run, roll back, reset, or drop package tables from one focused workspace.</p>
               </div>
               <div class="ux-actions">
                 <div class="relative min-w-72 max-lg:min-w-0">
@@ -14,6 +14,8 @@
                 </div>
                 <button onclick="refreshMigrations()" class="ux-btn">Refresh</button>
                 <button onclick="runInspectorAction('migrate')" class="ux-btn ux-btn-primary">Run Pending</button>
+                <button onclick="rollbackMigrations()" class="ux-btn">Rollback</button>
+                <button onclick="freshMigrations()" class="ux-btn">Fresh</button>
               </div>
             </div>
             <div id="migrationTabs" class="mb-4 flex flex-wrap gap-2"></div>

@@ -1,4 +1,4 @@
-    const state = { selected: null, selectedRowKeys: [], limit: 50, offset: 0, search: '', tableFilter: '', view: 'dashboard', tables: [], database: null, selectedConnectionIndex: 0, connectionDetailTab: 'details', queryTable: '', queryColumns: [], querySelectedColumns: [], queryConditions: [], queryRows: [], queryBuilderMode: 'builder', queryPanelTab: 'results', queryLastPayload: null, queryLastExecutedAt: '', queryHistory: [], queryRawSql: '', queryRawResult: null, savedQueries: [], routes: null, routeSearch: '', routeGroup: 'all', selectedRoute: 0, selectedAction: 0, flow: null, flowSearch: '', flowTab: 'flow', flowType: 'all', flowStatus: 'all', flowGroup: 'web', selectedFlow: 0, migrations: null, migrationSearch: '', migrationStatus: 'all', selectedMigration: 0, migrationDetailTab: 'sql', migrationActionMenu: null, schedule: null, scheduleSearch: '', scheduleStatus: 'all', selectedSchedule: 0, logs: null, logSearch: '', logLevel: 'all', selectedLog: 0, logLive: false, themes: null, themeSearch: '', selectedTheme: 0, users: null, userSearch: '', userStatus: 'all', selectedUser: 0, lastLogin: null, pinker: null, pinkerTab: 'overview', build: null, views: null, viewSearch: '', viewType: 'all', selectedView: 0, viewEditing: false, lang: null, langSearch: '', langScope: 'all', langLocale: 'all', langSyncReference: 'en', selectedLang: 0, langEditing: false, env: null, config: null, configSearch: '', configCategory: 'all', selectedConfig: 0, configEditing: false, busy: false, ready: false, loaded: {}, loading: {}, platform: false, locked: false, selectable: false, activePackage: '', apps: [] };
+    const state = { selected: null, selectedRowKeys: [], limit: 50, offset: 0, search: '', tableFilter: '', view: 'dashboard', tables: [], database: null, selectedConnectionIndex: 0, connectionDetailTab: 'details', queryTable: '', queryColumns: [], querySelectedColumns: [], queryConditions: [], queryRows: [], queryBuilderMode: 'builder', queryPanelTab: 'results', queryLastPayload: null, queryLastExecutedAt: '', queryHistory: [], queryRawSql: '', queryRawResult: null, savedQueries: [], routes: null, routeSearch: '', routeGroup: 'all', selectedRoute: 0, selectedAction: 0, flow: null, flowSearch: '', flowTab: 'flow', flowType: 'all', flowStatus: 'all', flowGroup: 'web', selectedFlow: 0, migrations: null, migrationSearch: '', migrationStatus: 'all', selectedMigration: 0, migrationDetailTab: 'sql', migrationActionMenu: null, patches: null, patchSearch: '', patchStatus: 'all', selectedPatch: 0, patchActionMenu: null, schedule: null, scheduleSearch: '', scheduleStatus: 'all', selectedSchedule: 0, logs: null, logSearch: '', logLevel: 'all', selectedLog: 0, logLive: false, themes: null, themeSearch: '', selectedTheme: 0, users: null, userSearch: '', userStatus: 'all', selectedUser: 0, lastLogin: null, pinker: null, pinkerTab: 'overview', build: null, views: null, viewSearch: '', viewType: 'all', selectedView: 0, viewEditing: false, lang: null, langSearch: '', langScope: 'all', langLocale: 'all', langSyncReference: 'en', selectedLang: 0, langEditing: false, env: null, config: null, configSearch: '', configCategory: 'all', selectedConfig: 0, configEditing: false, busy: false, ready: false, loaded: {}, loading: {}, platform: false, locked: false, selectable: false, activePackage: '', apps: [] };
     const $ = (id) => document.getElementById(id);
     const base = location.pathname.startsWith('/~inspector') ? '/~inspector' : '';
     const packageStorageKey = 'pinx.inspector.package';
@@ -232,6 +232,9 @@
       } else if (view === 'migrations') {
         setHtml('migrationsContent', loadingPanel('Loading migrations', 'Reading migration files and execution status.'));
         setHtml('migrationDetails', compactLoading('Loading migration details'));
+      } else if (view === 'patches') {
+        setHtml('patchesContent', loadingPanel('Loading patches', 'Reading patch files and history status.'));
+        setHtml('patchDetails', compactLoading('Loading patch details'));
       } else if (view === 'routes') {
         setHtml('routesContent', loadingPanel('Loading routes', 'Reading route files and actions.'));
         setHtml('routeDetails', compactLoading('Loading route details'));
@@ -1670,9 +1673,13 @@
         <div class="rounded-3xl border border-white/10 bg-[#091320]/90 p-4 shadow-[0_18px_70px_rgba(0,0,0,.22)]">
           <h3 class="font-bold text-white">Quick Actions</h3>
           <div class="mt-4 grid gap-2">
-            <button onclick="runInspectorAction('migrate')" class="rounded-xl bg-violet-500 px-4 py-3 text-left text-sm font-bold text-white hover:bg-violet-400">Run Migration</button>
-            <button onclick="refreshMigrations()" class="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-left text-sm font-bold text-slate-200 hover:bg-white/10">Refresh Status</button>
+            <button onclick="runInspectorAction('migrate')" class="rounded-xl bg-violet-500 px-4 py-3 text-left text-sm font-bold text-white hover:bg-violet-400">Run Pending</button>
             <button onclick="rollbackMigrations()" class="rounded-xl border border-amber-300/20 bg-amber-400/10 px-4 py-3 text-left text-sm font-bold text-amber-100 hover:bg-amber-400/20">Rollback Last Batch</button>
+            <button onclick="rollbackMigrations(2)" class="rounded-xl border border-amber-300/20 bg-amber-400/10 px-4 py-3 text-left text-sm font-bold text-amber-100 hover:bg-amber-400/20">Rollback 2 Batches</button>
+            <button onclick="resetMigrations()" class="rounded-xl border border-orange-300/20 bg-orange-400/10 px-4 py-3 text-left text-sm font-bold text-orange-100 hover:bg-orange-400/20">Reset All (down)</button>
+            <button onclick="dropMigrationTables()" class="rounded-xl border border-rose-300/20 bg-rose-500/10 px-4 py-3 text-left text-sm font-bold text-rose-100 hover:bg-rose-500/20">Drop Tables</button>
+            <button onclick="freshMigrations()" class="rounded-xl border border-rose-300/20 bg-rose-500/10 px-4 py-3 text-left text-sm font-bold text-rose-100 hover:bg-rose-500/20">Fresh (drop + migrate)</button>
+            <button onclick="refreshMigrations()" class="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-left text-sm font-bold text-slate-200 hover:bg-white/10">Refresh Status</button>
           </div>
         </div>
       `;
@@ -1701,9 +1708,145 @@
       <div><div class="mb-2 flex items-center justify-between"><span class="font-bold text-white">Down SQL</span><button data-copy="${esc(item.down_sql || '')}" onclick="copyText(this.dataset.copy)" class="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-xs text-slate-300">Copy</button></div><pre class="max-h-48 overflow-auto rounded-2xl bg-[#06101c] p-4 text-xs leading-relaxed text-violet-200">${esc(item.down_sql || '-- No preview available.')}</pre></div>`;
     }
 
-    async function rollbackMigrations() {
-      if (!confirm('Rollback the latest migration batch? This can change your local schema and data.')) return;
-      await runInspectorAction('migrate_rollback');
+    async function rollbackMigrations(step = 1) {
+      const label = step > 1 ? `${step} migration batches` : 'the latest migration batch';
+      const ok = await askConfirm('Rollback migrations?', `This will roll back ${label}. Local schema and data may change.`, 'warn');
+      if (!ok) return;
+      await runInspectorAction('migrate_rollback', { step });
+    }
+
+    async function resetMigrations() {
+      const ok = await askConfirm('Reset all migrations?', 'This rolls back every batch via down(). Prefer Drop Tables only when down() is incomplete.', 'danger');
+      if (!ok) return;
+      await runInspectorAction('migrate_reset', { force: true });
+    }
+
+    async function dropMigrationTables() {
+      const ok = await askConfirm('Drop migration tables?', 'This hard-drops package tables and clears migration history. This cannot be undone from Inspector.', 'danger');
+      if (!ok) return;
+      await runInspectorAction('migrate_drop', { force: true });
+    }
+
+    async function freshMigrations() {
+      const ok = await askConfirm('Fresh migrations?', 'Drop package tables, clear history, then re-run all migrations.', 'danger');
+      if (!ok) return;
+      await runInspectorAction('migrate_fresh', { force: true });
+    }
+
+    async function loadPatches() {
+      const payload = await api('/api/patches');
+      state.patches = payload;
+      renderPatches();
+    }
+
+    async function refreshPatches() {
+      await runWithLoading('Refreshing patches', 'Reading patch files and history status.', async () => {
+        await loadPatches();
+      }, 'Patch status was refreshed.');
+    }
+
+    function filteredPatches() {
+      const query = state.patchSearch.trim().toLowerCase();
+      return (state.patches?.items || []).filter(item => {
+        if (state.patchStatus !== 'all' && item.status !== state.patchStatus) return false;
+        if (!query) return true;
+        const haystack = [item.name, item.file, item.path, item.package, item.status, item.description].join(' ').toLowerCase();
+        return haystack.includes(query);
+      });
+    }
+
+    function renderPatches() {
+      const payload = state.patches || { items: [], summary: {} };
+      const summary = payload.summary || {};
+      const items = filteredPatches();
+      if (state.selectedPatch >= items.length) state.selectedPatch = 0;
+      $('patchesTotalBadge').textContent = Number(summary.total || 0).toLocaleString();
+      renderPatchTabs(summary);
+      $('patchesContent').innerHTML = items.length ? `
+        <table class="w-full min-w-[900px] text-left text-sm">
+          <thead class="bg-white/[.04] text-xs uppercase tracking-wide text-slate-400">
+            <tr><th class="px-4 py-4 font-semibold">Patch</th><th class="px-4 py-4 font-semibold">Batch</th><th class="px-4 py-4 font-semibold">Status</th><th class="px-4 py-4 font-semibold">Rollback</th><th class="px-4 py-4 font-semibold">Executed At</th></tr>
+          </thead>
+          <tbody class="divide-y divide-white/10">
+            ${items.slice(0, 140).map((item, index) => `<tr onclick="selectPatch(${index})" class="cursor-pointer transition hover:bg-white/[.05] ${index === state.selectedPatch ? 'bg-teal-500/16' : ''}">
+              <td class="px-4 py-4"><div class="min-w-0"><div class="truncate font-medium text-slate-200">${esc(item.file || item.name)}</div><div class="mt-0.5 truncate text-xs text-slate-500">${esc(item.package || 'app')}${item.description ? ' | ' + esc(item.description) : ''}</div></div></td>
+              <td class="px-4 py-4 text-slate-300">${esc(item.batch ?? '-')}</td>
+              <td class="px-4 py-4">${migrationStatusBadge(item.status)}</td>
+              <td class="px-4 py-4 text-slate-300">${item.can_rollback ? 'yes' : 'no'}</td>
+              <td class="px-4 py-4 text-slate-300">${esc(item.ran_at_label || item.ran_at || '-')}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      ` : `<div class="grid min-h-[420px] place-items-center p-8 text-center text-slate-500"><div><div class="text-lg font-bold text-slate-300">No patches found</div><div class="mt-2 text-sm">${esc(payload.message || 'Create a patch with pinx patch:create.')}</div></div></div>`;
+      renderPatchDetails(items[state.selectedPatch] || null);
+    }
+
+    function renderPatchTabs(summary) {
+      const tabs = [['all', 'All', summary.total || 0], ['pending', 'Pending', summary.pending || 0], ['ran', 'Ran', summary.ran || 0], ['failed', 'Failed', summary.failed || 0]];
+      $('patchTabs').innerHTML = tabs.map(([key, label, count]) => {
+        const active = state.patchStatus === key;
+        return `<button onclick="setPatchStatus('${key}')" class="rounded-xl border px-4 py-2 text-sm font-bold transition ${active ? 'border-teal-300/40 bg-teal-500 text-white shadow-[0_12px_35px_rgba(20,184,166,.25)]' : 'border-white/10 bg-white/5 text-slate-300 hover:bg-white/10'}">${esc(label)} <span class="ml-2 rounded-lg bg-black/20 px-2 py-0.5 text-xs">${Number(count || 0).toLocaleString()}</span></button>`;
+      }).join('');
+    }
+
+    function setPatchStatus(status) {
+      state.patchStatus = status || 'all';
+      state.selectedPatch = 0;
+      renderPatches();
+    }
+
+    function selectPatch(index) {
+      state.selectedPatch = index;
+      renderPatches();
+      openDetailDrawerFrom('patchDetails', 'Patch Details', 'Patches');
+    }
+
+    function renderPatchDetails(item) {
+      if (!item) {
+        $('patchDetails').innerHTML = '<div class="rounded-3xl border border-dashed border-white/10 p-6 text-center text-slate-500">Select a patch to inspect details.</div>';
+        return;
+      }
+      $('patchDetails').innerHTML = `
+        <div class="rounded-3xl border border-white/10 bg-[#091320]/90 p-4 shadow-[0_18px_70px_rgba(0,0,0,.22)]">
+          <h3 class="font-bold text-white">Patch Details</h3>
+          <div class="mt-4 overflow-hidden rounded-2xl border border-white/10 bg-black/20">
+            ${migrationDetailRow('Name', item.file || item.name)}
+            ${migrationDetailRow('Status', item.status || 'pending')}
+            ${migrationDetailRow('Batch', item.batch ?? '-')}
+            ${migrationDetailRow('Rollback', item.can_rollback ? 'supported' : 'not supported')}
+            ${migrationDetailRow('Package', item.package || 'app')}
+            ${migrationDetailRow('Path', item.path || '-')}
+            ${migrationDetailRow('Description', item.description || '-')}
+          </div>
+        </div>
+        <div class="rounded-3xl border border-white/10 bg-[#091320]/90 p-4 shadow-[0_18px_70px_rgba(0,0,0,.22)]">
+          <h3 class="font-bold text-white">Quick Actions</h3>
+          <div class="mt-4 grid gap-2">
+            <button onclick="runInspectorAction('patch_run')" class="rounded-xl bg-teal-500 px-4 py-3 text-left text-sm font-bold text-white hover:bg-teal-400">Run Pending Patches</button>
+            <button onclick="rollbackPatches()" class="rounded-xl border border-amber-300/20 bg-amber-400/10 px-4 py-3 text-left text-sm font-bold text-amber-100 hover:bg-amber-400/20">Rollback Latest</button>
+            <button onclick="rollbackPatches(2)" class="rounded-xl border border-amber-300/20 bg-amber-400/10 px-4 py-3 text-left text-sm font-bold text-amber-100 hover:bg-amber-400/20">Rollback 2 Steps</button>
+            <button onclick="resetPatches()" class="rounded-xl border border-rose-300/20 bg-rose-500/10 px-4 py-3 text-left text-sm font-bold text-rose-100 hover:bg-rose-500/20">Reset All Rollbackable</button>
+            <button onclick="refreshPatches()" class="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-left text-sm font-bold text-slate-200 hover:bg-white/10">Refresh Status</button>
+          </div>
+        </div>
+        <div class="rounded-3xl border border-white/10 bg-[#091320]/90 p-4 shadow-[0_18px_70px_rgba(0,0,0,.22)]">
+          <h3 class="font-bold text-white">Source Preview</h3>
+          <pre class="mt-4 max-h-80 overflow-auto rounded-2xl bg-[#06101c] p-4 text-xs leading-relaxed text-slate-300">${esc(item.content || 'Patch source is not available.')}</pre>
+        </div>
+      `;
+      syncDetailDrawerFrom('patchDetails');
+    }
+
+    async function rollbackPatches(step = 1) {
+      const ok = await askConfirm('Rollback patches?', step > 1 ? `Roll back the last ${step} rollbackable patches?` : 'Roll back the latest rollbackable patch?', 'warn');
+      if (!ok) return;
+      await runInspectorAction('patch_rollback', { step });
+    }
+
+    async function resetPatches() {
+      const ok = await askConfirm('Reset patches?', 'This rolls back every successful patch that supports down().', 'danger');
+      if (!ok) return;
+      await runInspectorAction('patch_reset', { force: true });
     }
 
     function migrationDetailRow(label, value) {
@@ -3840,13 +3983,37 @@
       }).join('') : '<div class="p-5 text-sm text-slate-500">No log entries yet.</div>';
     }
 
-    async function runInspectorAction(action) {
+    async function runInspectorAction(action, options = {}) {
       if (!ensureReady()) return;
-      const targetView = action === 'doctor' ? 'health' : ['migrate', 'migrate_rollback', 'migrate_status'].includes(action) ? 'migrations' : ['build', 'build_sign', 'release_patch'].includes(action) ? 'build' : ['pinker_status', 'pinker_rebuild', 'pinker_clear'].includes(action) ? 'pinker' : ['schedule_list', 'schedule_run'].includes(action) ? 'schedule' : 'dashboard';
+      const migrationActions = ['migrate', 'migrate_rollback', 'migrate_reset', 'migrate_drop', 'migrate_fresh', 'migrate_status'];
+      const patchActions = ['patch_run', 'patch_rollback', 'patch_reset', 'patch_status'];
+      const targetView = action === 'doctor' ? 'health' : migrationActions.includes(action) ? 'migrations' : patchActions.includes(action) ? 'patches' : ['build', 'build_sign', 'release_patch'].includes(action) ? 'build' : ['pinker_status', 'pinker_rebuild', 'pinker_clear'].includes(action) ? 'pinker' : ['schedule_list', 'schedule_run'].includes(action) ? 'schedule' : 'dashboard';
       if (state.view !== targetView) switchView(targetView);
       closeDetailDrawer();
-      const actionTitle = action === 'migrate' ? 'Running migrations' : action === 'migrate_rollback' ? 'Rolling back migrations' : action === 'doctor' ? 'Running doctor' : 'Running Inspector action';
-      const actionMessage = action === 'migrate' ? 'Building app and platform database tables.' : action === 'migrate_rollback' ? 'Rolling back the latest migration batch.' : action === 'doctor' ? 'Checking project health and environment.' : 'Please wait while Inspector finishes this action.';
+      const actionTitles = {
+        migrate: 'Running migrations',
+        migrate_rollback: 'Rolling back migrations',
+        migrate_reset: 'Resetting migrations',
+        migrate_drop: 'Dropping migration tables',
+        migrate_fresh: 'Fresh migrations',
+        patch_run: 'Running patches',
+        patch_rollback: 'Rolling back patches',
+        patch_reset: 'Resetting patches',
+        doctor: 'Running doctor',
+      };
+      const actionMessages = {
+        migrate: 'Building app and platform database tables.',
+        migrate_rollback: 'Rolling back migration batch(es).',
+        migrate_reset: 'Rolling back every executed migration batch.',
+        migrate_drop: 'Dropping package tables and clearing history.',
+        migrate_fresh: 'Dropping tables and re-running migrations.',
+        patch_run: 'Executing pending data patches.',
+        patch_rollback: 'Rolling back the latest rollbackable patch(es).',
+        patch_reset: 'Rolling back all rollbackable patches.',
+        doctor: 'Checking project health and environment.',
+      };
+      const actionTitle = actionTitles[action] || 'Running Inspector action';
+      const actionMessage = actionMessages[action] || 'Please wait while Inspector finishes this action.';
       const box = actionResultBox(action);
       box.classList.remove('hidden');
       box.className = 'rounded-3xl border border-sky-300/20 bg-sky-400/10 p-4 text-sky-100';
@@ -3854,7 +4021,7 @@
       setBusy(true, actionTitle, actionMessage);
       let payload;
       try {
-        payload = await post('/api/action/run', { action });
+        payload = await post('/api/action/run', { action, ...options });
       } catch (error) {
         payload = { ok: false, title: actionTitle + ' failed', message: error.message || 'The action could not finish.', cards: [] };
       }
@@ -3890,7 +4057,8 @@
 
     function actionResultBox(action) {
       if (action === 'doctor') return $('healthActionResult');
-      if (['migrate', 'migrate_rollback', 'migrate_status'].includes(action)) return $('migrationsActionResult');
+      if (['migrate', 'migrate_rollback', 'migrate_reset', 'migrate_drop', 'migrate_fresh', 'migrate_status'].includes(action)) return $('migrationsActionResult');
+      if (['patch_run', 'patch_rollback', 'patch_reset', 'patch_status'].includes(action)) return $('patchesActionResult');
       if (['build', 'build_sign', 'release_patch'].includes(action)) return $('buildActionResult');
       if (['schedule_list', 'schedule_run'].includes(action)) return $('scheduleActionResult');
       return $('actionResult');
@@ -3924,6 +4092,8 @@
           await loadHealth();
         } else if (view === 'migrations') {
           await loadMigrations();
+        } else if (view === 'patches') {
+          await loadPatches();
         } else if (view === 'routes') {
           await loadRoutes();
         } else if (view === 'flow') {
@@ -4044,6 +4214,7 @@
     $('flowStatusFilter').onchange = (event) => { state.flowStatus = event.target.value || 'all'; state.selectedFlow = 0; renderFlow(); };
     $('flowGroupFilter').onchange = (event) => { state.flowGroup = event.target.value || 'web'; renderFlow(); };
     $('migrationSearch').oninput = (event) => { state.migrationSearch = event.target.value || ''; state.selectedMigration = 0; renderMigrations(); };
+    $('patchSearch')?.addEventListener('input', (event) => { state.patchSearch = event.target.value || ''; state.selectedPatch = 0; renderPatches(); });
     $('scheduleSearch').oninput = (event) => { state.scheduleSearch = event.target.value || ''; state.selectedSchedule = 0; renderSchedule(); };
     $('scheduleStatusFilter').onchange = (event) => { state.scheduleStatus = event.target.value || 'all'; state.selectedSchedule = 0; renderSchedule(); };
     $('themeSearch').oninput = (event) => { state.themeSearch = event.target.value || ''; state.selectedTheme = 0; renderThemes(); };
@@ -4057,7 +4228,7 @@
     loadApps().then(() => boot()).then(() => {
       setReady(true);
       const initial = (location.hash || '#dashboard').slice(1);
-      switchView(['dashboard', 'connections', 'database', 'query', 'health', 'migrations', 'routes', 'users', 'flow', 'schedule', 'logs', 'themes', 'pinker', 'build', 'views', 'lang', 'env', 'config', 'export'].includes(initial) ? initial : 'dashboard');
+      switchView(['dashboard', 'connections', 'database', 'query', 'health', 'migrations', 'patches', 'routes', 'users', 'flow', 'schedule', 'logs', 'themes', 'pinker', 'build', 'views', 'lang', 'env', 'config', 'export'].includes(initial) ? initial : 'dashboard');
     }).catch(error => {
       showOperation('danger', 'Inspector could not load', error.message || 'The initial project scan failed.');
       const lock = $('bootLock');
