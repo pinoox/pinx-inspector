@@ -1497,6 +1497,8 @@
             <div class="flex flex-wrap gap-2">
               <button onclick="openNewRowForm()" class="rounded-xl bg-violet-500 px-4 py-2 text-sm font-bold text-white shadow-[0_12px_35px_rgba(124,58,237,.25)] hover:bg-violet-400">New Row</button>
               <button id="deleteSelectedRowsBtn" onclick="deleteSelectedTableRows()" disabled class="rounded-xl border border-rose-300/20 bg-rose-500/10 px-4 py-2 text-sm font-bold text-rose-200 opacity-50 hover:bg-rose-500/20 disabled:cursor-not-allowed">Delete Selected</button>
+              <button onclick="emptyCurrentTable()" class="rounded-xl border border-amber-300/25 bg-amber-500/10 px-4 py-2 text-sm font-bold text-amber-100 hover:bg-amber-500/20">Empty</button>
+              <button onclick="dropCurrentTable()" class="rounded-xl border border-rose-300/30 bg-rose-500/15 px-4 py-2 text-sm font-bold text-rose-100 hover:bg-rose-500/25">Drop</button>
               <button onclick="exportSnapshot()" class="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm font-bold text-slate-200 hover:bg-white/10">Export Snapshot</button>
               <button onclick="loadTable()" class="grid h-10 w-10 place-items-center rounded-xl border border-white/10 bg-white/5 text-slate-300 hover:bg-white/10">${icon('refreshCw')}</button>
             </div>
@@ -1661,6 +1663,67 @@
         await loadTables();
         await loadTable();
       }, 'Selected row(s) were deleted.');
+    }
+
+    async function emptyCurrentTable() {
+      const payload = state.tablePayload || {};
+      if (!payload.table) {
+        showOperation('warn', 'No table selected', 'Open a table first.');
+        return;
+      }
+      const ok = await askConfirm(
+        'Empty table?',
+        `This will delete all rows from ${payload.table}. The table structure stays.`,
+        'warn'
+      );
+      if (!ok) return;
+      await runWithLoading('Emptying table', 'Removing all rows from ' + payload.table + '.', async () => {
+        const result = await post('/api/table/empty', { table: payload.table });
+        if (result.error || result.ok === false) {
+          throw new Error(result.message || 'Table could not be emptied.');
+        }
+        state.offset = 0;
+        state.selectedRowKeys = [];
+        await loadTables();
+        await loadTable();
+      }, 'Table was emptied.');
+    }
+
+    async function dropCurrentTable() {
+      const payload = state.tablePayload || {};
+      if (!payload.table) {
+        showOperation('warn', 'No table selected', 'Open a table first.');
+        return;
+      }
+      const tableName = payload.table;
+      const ok = await askConfirm(
+        'Drop table?',
+        `This permanently deletes table ${tableName} and all of its data.`,
+        'danger'
+      );
+      if (!ok) return;
+      await runWithLoading('Dropping table', 'Removing table ' + tableName + ' from the database.', async () => {
+        const result = await post('/api/table/drop', { table: tableName });
+        if (result.error || result.ok === false) {
+          throw new Error(result.message || 'Table could not be dropped.');
+        }
+        state.selected = null;
+        state.tablePayload = null;
+        state.selectedRowKeys = [];
+        state.fkLookupCache = {};
+        state.fkSelectedFields = {};
+        state.fkPreviewForTable = '';
+        state.offset = 0;
+        await loadTables();
+        const breadcrumb = $('tableBreadcrumb');
+        if (breadcrumb) {
+          breadcrumb.classList.add('hidden');
+          breadcrumb.classList.remove('flex');
+        }
+        if ($('databaseContent')) {
+          $('databaseContent').innerHTML = '<div class="grid min-h-[420px] place-items-center p-8 text-center text-slate-500"><div><div class="text-lg font-bold text-slate-300">Table dropped</div><div class="mt-2 text-sm">Select another table from the list to continue.</div></div></div>';
+        }
+      }, 'Table was dropped.');
     }
 
     function renderTableTab(tab) {

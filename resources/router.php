@@ -111,6 +111,28 @@ try {
         return;
     }
 
+    if ($path === '/api/table/empty') {
+        if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
+            json_response(['error' => true, 'message' => 'POST is required.'], 405);
+            return;
+        }
+
+        $payload = json_decode((string) file_get_contents('php://input'), true);
+        json_response(empty_table_payload($root, is_array($payload) ? $payload : []));
+        return;
+    }
+
+    if ($path === '/api/table/drop') {
+        if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
+            json_response(['error' => true, 'message' => 'POST is required.'], 405);
+            return;
+        }
+
+        $payload = json_decode((string) file_get_contents('php://input'), true);
+        json_response(drop_table_payload($root, is_array($payload) ? $payload : []));
+        return;
+    }
+
     if ($path === '/api/query/raw') {
         if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
             json_response(['error' => true, 'message' => 'POST is required.'], 405);
@@ -1567,6 +1589,194 @@ function devdb_json_delete_table_rows(string $root, string $table, array $keys):
         'deleted' => $deleted,
         'row_count' => count($rows),
         'message' => $deleted . ' row(s) deleted from ' . $table . '.',
+    ];
+}
+
+/**
+ * @param array<string, mixed> $payload
+ * @return array{ok: bool, table: string, engine: string, deleted?: int, message: string}
+ */
+function empty_table_payload(string $root, array $payload): array
+{
+    $table = trim((string) ($payload['table'] ?? ''));
+    if ($table === '') {
+        throw new RuntimeException('Table name is required.');
+    }
+
+    return match (engine($root)) {
+        'mysql' => pdo_empty_table($root, 'mysql', $table),
+        'pgsql' => pdo_empty_table($root, 'pgsql', $table),
+        'sqlite' => pdo_empty_table($root, 'sqlite', $table),
+        'devdb-sqlite' => pdo_empty_table($root, 'sqlite', $table, true),
+        default => devdb_json_empty_table($root, $table),
+    };
+}
+
+function pdo_empty_table(string $root, string $driver, string $table, bool $devdbSqlite = false): array
+{
+    $pdo = $devdbSqlite ? sqlite_pdo($root) : pdo_for_connection($root, $driver);
+    $columns = $driver === 'sqlite' ? sqlite_columns($pdo, $table) : pdo_columns($pdo, $driver, $table);
+    if ($columns === []) {
+        throw new RuntimeException('Table "' . $table . '" does not exist.');
+    }
+
+    $quotedTable = $driver === 'sqlite' ? quote_identifier($table) : quote_identifier_for($driver, $table);
+    $deleted = (int) $pdo->exec('DELETE FROM ' . $quotedTable);
+
+    if ($driver === 'sqlite') {
+        try {
+            $sequence = $pdo->prepare('DELETE FROM sqlite_sequence WHERE name = ?');
+            $sequence->execute([$table]);
+        } catch (Throwable) {
+            // sqlite_sequence only exists when AUTOINCREMENT was used.
+        }
+    } elseif ($driver === 'mysql') {
+        try {
+            $pdo->exec('ALTER TABLE ' . $quotedTable . ' AUTO_INCREMENT = 1');
+        } catch (Throwable) {
+            // Ignore when the table has no auto-increment column.
+        }
+    } elseif ($driver === 'pgsql') {
+        foreach ($columns as $name => $meta) {
+            if (empty($meta['auto_increment']) && empty($meta['primary'])) {
+                continue;
+            }
+            $type = strtolower((string) ($meta['type'] ?? ''));
+            if (!str_contains($type, 'serial') && !str_contains($type, 'identity') && empty($meta['auto_increment'])) {
+                continue;
+            }
+            try {
+                $pdo->exec('ALTER SEQUENCE IF EXISTS ' . quote_identifier_for($driver, $table . '_' . $name . '_seq') . ' RESTART WITH 1');
+            } catch (Throwable) {
+                // Sequence naming varies; clearing rows is enough.
+            }
+            break;
+        }
+    }
+
+    return [
+        'ok' => true,
+        'table' => $table,
+        'engine' => $devdbSqlite ? 'devdb-sqlite' : $driver,
+        'deleted' => $deleted,
+        'message' => 'Table ' . $table . ' was emptied.',
+    ];
+}
+
+function devdb_json_empty_table(string $root, string $table): array
+{
+    $schema = json_file(devdb_path($root) . '/schema.json', ['tables' => []]);
+    if (!is_array($schema['tables'][$table] ?? null)) {
+        throw new RuntimeException('Table "' . $table . '" does not exist.');
+    }
+
+    $path = devdb_path($root) . '/data/' . safe_table_file($table) . '.json';
+    $previous = json_file($path, []);
+    $deleted = is_array($previous) ? count($previous) : 0;
+    locked_json_update($path, [], static fn (): array => []);
+
+    $sequencesPath = devdb_path($root) . '/meta/sequences.json';
+    if (is_file($sequencesPath)) {
+        locked_json_update($sequencesPath, [], static function (array $sequences) use ($table): array {
+            unset($sequences[$table]);
+            return $sequences;
+        });
+    }
+
+    return [
+        'ok' => true,
+        'table' => $table,
+        'engine' => 'devdb-json',
+        'deleted' => $deleted,
+        'row_count' => 0,
+        'message' => 'Table ' . $table . ' was emptied.',
+    ];
+}
+
+/**
+ * @param array<string, mixed> $payload
+ * @return array{ok: bool, table: string, engine: string, message: string}
+ */
+function drop_table_payload(string $root, array $payload): array
+{
+    $table = trim((string) ($payload['table'] ?? ''));
+    if ($table === '') {
+        throw new RuntimeException('Table name is required.');
+    }
+
+    return match (engine($root)) {
+        'mysql' => pdo_drop_table($root, 'mysql', $table),
+        'pgsql' => pdo_drop_table($root, 'pgsql', $table),
+        'sqlite' => pdo_drop_table($root, 'sqlite', $table),
+        'devdb-sqlite' => pdo_drop_table($root, 'sqlite', $table, true),
+        default => devdb_json_drop_table($root, $table),
+    };
+}
+
+function pdo_drop_table(string $root, string $driver, string $table, bool $devdbSqlite = false): array
+{
+    $pdo = $devdbSqlite ? sqlite_pdo($root) : pdo_for_connection($root, $driver);
+    $columns = $driver === 'sqlite' ? sqlite_columns($pdo, $table) : pdo_columns($pdo, $driver, $table);
+    if ($columns === []) {
+        throw new RuntimeException('Table "' . $table . '" does not exist.');
+    }
+
+    $quotedTable = $driver === 'sqlite' ? quote_identifier($table) : quote_identifier_for($driver, $table);
+    if ($driver === 'mysql') {
+        $pdo->exec('SET FOREIGN_KEY_CHECKS=0');
+        try {
+            $pdo->exec('DROP TABLE IF EXISTS ' . $quotedTable);
+        } finally {
+            $pdo->exec('SET FOREIGN_KEY_CHECKS=1');
+        }
+    } elseif ($driver === 'pgsql') {
+        $pdo->exec('DROP TABLE IF EXISTS ' . $quotedTable . ' CASCADE');
+    } else {
+        $pdo->exec('DROP TABLE IF EXISTS ' . $quotedTable);
+    }
+
+    return [
+        'ok' => true,
+        'table' => $table,
+        'engine' => $devdbSqlite ? 'devdb-sqlite' : $driver,
+        'message' => 'Table ' . $table . ' was dropped.',
+    ];
+}
+
+function devdb_json_drop_table(string $root, string $table): array
+{
+    $schemaPath = devdb_path($root) . '/schema.json';
+    $schema = json_file($schemaPath, ['tables' => []]);
+    if (!is_array($schema['tables'][$table] ?? null)) {
+        throw new RuntimeException('Table "' . $table . '" does not exist.');
+    }
+
+    locked_json_update($schemaPath, ['tables' => []], static function (array $schema) use ($table): array {
+        if (!isset($schema['tables']) || !is_array($schema['tables'])) {
+            $schema['tables'] = [];
+        }
+        unset($schema['tables'][$table]);
+        return $schema;
+    });
+
+    $dataPath = devdb_path($root) . '/data/' . safe_table_file($table) . '.json';
+    if (is_file($dataPath)) {
+        @unlink($dataPath);
+    }
+
+    $sequencesPath = devdb_path($root) . '/meta/sequences.json';
+    if (is_file($sequencesPath)) {
+        locked_json_update($sequencesPath, [], static function (array $sequences) use ($table): array {
+            unset($sequences[$table]);
+            return $sequences;
+        });
+    }
+
+    return [
+        'ok' => true,
+        'table' => $table,
+        'engine' => 'devdb-json',
+        'message' => 'Table ' . $table . ' was dropped.',
     ];
 }
 
