@@ -1,4 +1,4 @@
-    const state = { selected: null, selectedRowKeys: [], limit: 50, offset: 0, search: '', tableFilter: '', view: 'dashboard', tables: [], database: null, selectedConnectionIndex: 0, connectionDetailTab: 'details', fkPreviewEnabled: false, fkSelectedFields: {}, fkLookupCache: {}, fkPreviewForTable: '', queryTable: '', queryColumns: [], querySelectedColumns: [], queryConditions: [], queryRows: [], queryBuilderMode: 'builder', queryPanelTab: 'results', queryLastPayload: null, queryLastExecutedAt: '', queryHistory: [], queryRawSql: '', queryRawResult: null, savedQueries: [], routes: null, routeSearch: '', routeGroup: 'all', selectedRoute: 0, selectedAction: 0, flow: null, flowSearch: '', flowTab: 'flow', flowType: 'all', flowStatus: 'all', flowGroup: 'web', selectedFlow: 0, migrations: null, migrationSearch: '', migrationStatus: 'all', selectedMigration: 0, migrationDetailTab: 'sql', migrationActionMenu: null, patches: null, patchSearch: '', patchStatus: 'all', selectedPatch: 0, patchActionMenu: null, setup: null, setupOptions: { deps: true, frontend: true, seed: false, patch: true }, setupRunning: false, schedule: null, scheduleSearch: '', scheduleStatus: 'all', selectedSchedule: 0, logs: null, logSearch: '', logLevel: 'all', selectedLog: 0, logLive: false, themes: null, themeSearch: '', selectedTheme: 0, users: null, userSearch: '', userStatus: 'all', selectedUser: 0, lastLogin: null, pinker: null, pinkerTab: 'overview', build: null, views: null, viewSearch: '', viewType: 'all', selectedView: 0, viewEditing: false, lang: null, langSearch: '', langScope: 'all', langLocale: 'all', langSyncReference: 'en', selectedLang: 0, langEditing: false, env: null, config: null, configSearch: '', configCategory: 'all', selectedConfig: 0, configEditing: false, busy: false, ready: false, loaded: {}, loading: {}, platform: false, locked: false, selectable: false, activePackage: '', apps: [] };
+    const state = { selected: null, selectedRowKeys: [], limit: 50, offset: 0, search: '', tableFilter: '', view: 'dashboard', tables: [], database: null, selectedConnectionIndex: 0, connectionDetailTab: 'details', fkPreviewEnabled: false, fkSelectedFields: {}, fkLookupCache: {}, fkPreviewForTable: '', schemaBuilder: { mode: 'table', table: '', timestamps: true, softDeletes: false, createInDatabase: true, saveMigration: false, columns: [], previewCode: '', previewFilename: '' }, queryTable: '', queryColumns: [], querySelectedColumns: [], queryConditions: [], queryRows: [], queryBuilderMode: 'builder', queryPanelTab: 'results', queryLastPayload: null, queryLastExecutedAt: '', queryHistory: [], queryRawSql: '', queryRawResult: null, savedQueries: [], routes: null, routeSearch: '', routeGroup: 'all', selectedRoute: 0, selectedAction: 0, flow: null, flowSearch: '', flowTab: 'flow', flowType: 'all', flowStatus: 'all', flowGroup: 'web', selectedFlow: 0, migrations: null, migrationSearch: '', migrationStatus: 'all', selectedMigration: 0, migrationDetailTab: 'sql', migrationActionMenu: null, patches: null, patchSearch: '', patchStatus: 'all', selectedPatch: 0, patchActionMenu: null, setup: null, setupOptions: { deps: true, frontend: true, seed: false, patch: true }, setupRunning: false, schedule: null, scheduleSearch: '', scheduleStatus: 'all', selectedSchedule: 0, logs: null, logSearch: '', logLevel: 'all', selectedLog: 0, logLive: false, themes: null, themeSearch: '', selectedTheme: 0, users: null, userSearch: '', userStatus: 'all', selectedUser: 0, lastLogin: null, pinker: null, pinkerTab: 'overview', build: null, views: null, viewSearch: '', viewType: 'all', selectedView: 0, viewEditing: false, lang: null, langSearch: '', langScope: 'all', langLocale: 'all', langSyncReference: 'en', selectedLang: 0, langEditing: false, env: null, config: null, configSearch: '', configCategory: 'all', selectedConfig: 0, configEditing: false, busy: false, ready: false, loaded: {}, loading: {}, platform: false, locked: false, selectable: false, activePackage: '', apps: [] };
     const $ = (id) => document.getElementById(id);
     const base = location.pathname.startsWith('/~inspector') ? '/~inspector' : '';
     const packageStorageKey = 'pinx.inspector.package';
@@ -1726,6 +1726,281 @@
       }, 'Table was dropped.');
     }
 
+    function schemaColumnTypes() {
+      return ['id', 'string', 'text', 'integer', 'bigInteger', 'boolean', 'decimal', 'float', 'date', 'dateTime', 'timestamp', 'json', 'uuid', 'foreignId'];
+    }
+
+    function defaultSchemaColumns() {
+      return [
+        { key: 'c1', name: 'id', type: 'id', length: '', nullable: false, unique: false, index: false, defaultValue: '', references: '' },
+        { key: 'c2', name: 'name', type: 'string', length: '255', nullable: false, unique: false, index: false, defaultValue: '', references: '' },
+      ];
+    }
+
+    function openSchemaBuilder(mode = 'table') {
+      const isMigration = mode === 'migration';
+      state.schemaBuilder = {
+        mode: isMigration ? 'migration' : 'table',
+        table: '',
+        timestamps: true,
+        softDeletes: false,
+        createInDatabase: !isMigration,
+        saveMigration: isMigration,
+        columns: defaultSchemaColumns(),
+        previewCode: '',
+        previewFilename: '',
+      };
+      const modal = $('schemaBuilderModal');
+      if (!modal) return;
+      $('schemaBuilderEyebrow').textContent = isMigration ? 'Migrations' : 'Tables';
+      $('schemaBuilderTitle').textContent = isMigration ? 'Create migration' : 'Add table';
+      $('schemaBuilderCopy').textContent = isMigration
+        ? 'Design columns graphically, save a migration file, and copy the generated PHP.'
+        : 'Create a table in the active database and copy the matching migration code.';
+      $('schemaBuilderSubmit').textContent = isMigration ? 'Create Migration' : 'Create Table';
+      renderSchemaBuilder();
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+      document.body.classList.add('overflow-hidden');
+    }
+
+    function closeSchemaBuilder() {
+      const modal = $('schemaBuilderModal');
+      if (!modal) return;
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+      document.body.classList.remove('overflow-hidden');
+    }
+
+    function renderSchemaBuilder() {
+      const builder = state.schemaBuilder || {};
+      const body = $('schemaBuilderBody');
+      if (!body) return;
+      const types = schemaColumnTypes();
+      body.innerHTML = `
+        <div class="grid gap-4">
+          <div class="grid grid-cols-2 gap-3 max-md:grid-cols-1">
+            <label class="rounded-2xl border border-white/10 bg-black/20 p-3">
+              <div class="text-xs font-bold uppercase tracking-wide text-slate-500">Table name</div>
+              <input id="schemaTableName" value="${esc(builder.table || '')}" placeholder="products" class="mt-2 h-10 w-full rounded-xl border border-white/10 bg-[#06101c] px-3 text-sm text-slate-100 outline-none focus:border-violet-300">
+            </label>
+            <div class="grid grid-cols-2 gap-2">
+              <label class="flex items-center gap-2 rounded-2xl border border-white/10 bg-black/20 px-3 py-3 text-sm font-bold text-slate-200"><input id="schemaTimestamps" type="checkbox" class="h-4 w-4 rounded border-slate-600 bg-black/30 text-violet-500" ${builder.timestamps ? 'checked' : ''}>timestamps</label>
+              <label class="flex items-center gap-2 rounded-2xl border border-white/10 bg-black/20 px-3 py-3 text-sm font-bold text-slate-200"><input id="schemaSoftDeletes" type="checkbox" class="h-4 w-4 rounded border-slate-600 bg-black/30 text-violet-500" ${builder.softDeletes ? 'checked' : ''}>softDeletes</label>
+              <label class="flex items-center gap-2 rounded-2xl border border-white/10 bg-black/20 px-3 py-3 text-sm font-bold text-slate-200"><input id="schemaCreateDb" type="checkbox" class="h-4 w-4 rounded border-slate-600 bg-black/30 text-violet-500" ${builder.createInDatabase ? 'checked' : ''}>Create in DB</label>
+              <label class="flex items-center gap-2 rounded-2xl border border-white/10 bg-black/20 px-3 py-3 text-sm font-bold text-slate-200"><input id="schemaSaveFile" type="checkbox" class="h-4 w-4 rounded border-slate-600 bg-black/30 text-violet-500" ${builder.saveMigration ? 'checked' : ''}>Save migration file</label>
+            </div>
+          </div>
+          <div class="overflow-hidden rounded-2xl border border-white/10">
+            <div class="flex items-center justify-between border-b border-white/10 bg-white/[.03] px-4 py-3">
+              <strong class="text-sm text-white">Columns</strong>
+              <button type="button" onclick="addSchemaColumn()" class="rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-bold text-slate-200 hover:bg-white/10">Add Column</button>
+            </div>
+            <div class="overflow-auto">
+              <table class="w-full min-w-[860px] text-left text-sm">
+                <thead class="bg-black/20 text-xs uppercase text-slate-500"><tr><th class="px-3 py-2">Name</th><th class="px-3 py-2">Type</th><th class="px-3 py-2">Length</th><th class="px-3 py-2">Null</th><th class="px-3 py-2">Unique</th><th class="px-3 py-2">Index</th><th class="px-3 py-2">Default</th><th class="px-3 py-2">References</th><th class="px-3 py-2"></th></tr></thead>
+                <tbody>${(builder.columns || []).map((col, index) => `
+                  <tr class="border-t border-white/10">
+                    <td class="px-3 py-2"><input data-schema-field="name" data-index="${index}" value="${esc(col.name || '')}" class="h-9 w-full rounded-lg border border-white/10 bg-[#06101c] px-2 text-sm"></td>
+                    <td class="px-3 py-2"><select data-schema-field="type" data-index="${index}" class="h-9 w-full rounded-lg border border-white/10 bg-[#06101c] px-2 text-sm">${types.map(type => `<option value="${type}" ${col.type === type ? 'selected' : ''}>${type}</option>`).join('')}</select></td>
+                    <td class="px-3 py-2"><input data-schema-field="length" data-index="${index}" value="${esc(col.length || '')}" class="h-9 w-20 rounded-lg border border-white/10 bg-[#06101c] px-2 text-sm"></td>
+                    <td class="px-3 py-2 text-center"><input data-schema-field="nullable" data-index="${index}" type="checkbox" class="h-4 w-4" ${col.nullable ? 'checked' : ''}></td>
+                    <td class="px-3 py-2 text-center"><input data-schema-field="unique" data-index="${index}" type="checkbox" class="h-4 w-4" ${col.unique ? 'checked' : ''}></td>
+                    <td class="px-3 py-2 text-center"><input data-schema-field="index" data-index="${index}" type="checkbox" class="h-4 w-4" ${col.index ? 'checked' : ''}></td>
+                    <td class="px-3 py-2"><input data-schema-field="defaultValue" data-index="${index}" value="${esc(col.defaultValue || '')}" class="h-9 w-28 rounded-lg border border-white/10 bg-[#06101c] px-2 text-sm"></td>
+                    <td class="px-3 py-2"><input data-schema-field="references" data-index="${index}" value="${esc(col.references || '')}" placeholder="users" class="h-9 w-28 rounded-lg border border-white/10 bg-[#06101c] px-2 text-sm"></td>
+                    <td class="px-3 py-2 text-right"><button type="button" onclick="removeSchemaColumn(${index})" class="rounded-lg border border-rose-300/20 bg-rose-500/10 px-2 py-1 text-xs font-bold text-rose-200">Remove</button></td>
+                  </tr>
+                `).join('')}</tbody>
+              </table>
+            </div>
+          </div>
+          <div class="rounded-2xl border border-white/10 bg-black/20 p-3">
+            <div class="mb-2 flex items-center justify-between gap-2">
+              <div>
+                <div class="text-sm font-bold text-white">Migration code</div>
+                <div class="text-xs text-slate-500">${esc(builder.previewFilename || 'Preview appears here')}</div>
+              </div>
+              <button type="button" onclick="copySchemaPreview()" class="rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-bold text-slate-200 hover:bg-white/10">Copy Code</button>
+            </div>
+            <pre id="schemaPreviewCode" class="max-h-64 overflow-auto rounded-xl border border-white/10 bg-[#06101c] p-3 text-xs leading-relaxed text-slate-200">${esc(builder.previewCode || '// Click Preview Code or Create to generate migration PHP')}</pre>
+          </div>
+        </div>
+      `;
+      body.querySelectorAll('[data-schema-field]').forEach((input) => {
+        const eventName = input.type === 'checkbox' || input.tagName === 'SELECT' ? 'change' : 'input';
+        input.addEventListener(eventName, () => syncSchemaBuilderFromDom());
+      });
+      ['schemaTableName', 'schemaTimestamps', 'schemaSoftDeletes', 'schemaCreateDb', 'schemaSaveFile'].forEach((id) => {
+        const el = $(id);
+        if (!el) return;
+        el.addEventListener(el.type === 'checkbox' ? 'change' : 'input', () => syncSchemaBuilderFromDom());
+      });
+    }
+
+    function syncSchemaBuilderFromDom() {
+      const builder = state.schemaBuilder || {};
+      builder.table = $('schemaTableName')?.value || '';
+      builder.timestamps = !!$('schemaTimestamps')?.checked;
+      builder.softDeletes = !!$('schemaSoftDeletes')?.checked;
+      builder.createInDatabase = !!$('schemaCreateDb')?.checked;
+      builder.saveMigration = !!$('schemaSaveFile')?.checked;
+      (builder.columns || []).forEach((col, index) => {
+        const root = $('schemaBuilderBody');
+        if (!root) return;
+        const get = (field) => root.querySelector(`[data-schema-field="${field}"][data-index="${index}"]`);
+        col.name = get('name')?.value || '';
+        col.type = get('type')?.value || 'string';
+        col.length = get('length')?.value || '';
+        col.nullable = !!get('nullable')?.checked;
+        col.unique = !!get('unique')?.checked;
+        col.index = !!get('index')?.checked;
+        col.defaultValue = get('defaultValue')?.value || '';
+        col.references = get('references')?.value || '';
+      });
+      state.schemaBuilder = builder;
+    }
+
+    function addSchemaColumn() {
+      syncSchemaBuilderFromDom();
+      state.schemaBuilder.columns.push({
+        key: 'c' + Date.now(),
+        name: '',
+        type: 'string',
+        length: '255',
+        nullable: true,
+        unique: false,
+        index: false,
+        defaultValue: '',
+        references: '',
+      });
+      renderSchemaBuilder();
+    }
+
+    function removeSchemaColumn(index) {
+      syncSchemaBuilderFromDom();
+      state.schemaBuilder.columns.splice(index, 1);
+      if (!state.schemaBuilder.columns.length) state.schemaBuilder.columns = defaultSchemaColumns();
+      renderSchemaBuilder();
+    }
+
+    function schemaBuilderRequestPayload() {
+      syncSchemaBuilderFromDom();
+      const builder = state.schemaBuilder || {};
+      return {
+        table: builder.table,
+        timestamps: !!builder.timestamps,
+        soft_deletes: !!builder.softDeletes,
+        create_in_database: !!builder.createInDatabase,
+        save_migration: !!builder.saveMigration,
+        columns: (builder.columns || []).map((col) => ({
+          name: col.name,
+          type: col.type,
+          length: col.length ? Number(col.length) : null,
+          nullable: !!col.nullable,
+          unique: !!col.unique,
+          index: !!col.index,
+          default: col.defaultValue === '' ? null : col.defaultValue,
+          references: col.references || null,
+        })),
+      };
+    }
+
+    function applySchemaPreview(result) {
+      const migration = result?.migration || {};
+      state.schemaBuilder.previewCode = migration.code || '';
+      state.schemaBuilder.previewFilename = migration.filename || '';
+      const preview = $('schemaPreviewCode');
+      if (preview) preview.textContent = state.schemaBuilder.previewCode || '';
+      const label = preview?.previousElementSibling?.querySelector?.('.text-xs');
+      // filename shown via re-render is enough when we call renderSchemaBuilder after
+    }
+
+    async function previewSchemaBuilder() {
+      const payload = schemaBuilderRequestPayload();
+      if (!payload.table) {
+        showOperation('warn', 'Table name required', 'Enter a table name first.');
+        return;
+      }
+      await runWithLoading('Generating preview', 'Building migration PHP from the schema designer.', async () => {
+        const result = await post('/api/migration/preview', payload);
+        applySchemaPreview(result);
+        renderSchemaBuilder();
+      }, 'Migration preview is ready.');
+    }
+
+    async function copySchemaPreview() {
+      syncSchemaBuilderFromDom();
+      if (!state.schemaBuilder.previewCode) {
+        await previewSchemaBuilder();
+      }
+      await copyText(state.schemaBuilder.previewCode || '');
+    }
+
+    async function submitSchemaBuilder() {
+      const payload = schemaBuilderRequestPayload();
+      if (!payload.table) {
+        showOperation('warn', 'Table name required', 'Enter a table name first.');
+        return;
+      }
+      if (!payload.create_in_database && !payload.save_migration) {
+        showOperation('warn', 'Nothing selected', 'Enable Create in DB and/or Save migration file.');
+        return;
+      }
+      const isMigration = state.schemaBuilder.mode === 'migration';
+      const endpoint = isMigration ? '/api/migration/create' : '/api/table/create';
+      const title = isMigration ? 'Creating migration' : 'Creating table';
+      await runWithLoading(title, 'Applying the schema designer changes.', async () => {
+        const result = await post(endpoint, payload);
+        if (result.error || result.ok === false) {
+          throw new Error(result.message || 'Schema action failed.');
+        }
+        applySchemaPreview(result);
+        renderSchemaBuilder();
+        if (payload.create_in_database) {
+          await loadTables();
+          if (result.physical_table || result.table) {
+            state.selected = result.physical_table || result.table;
+            state.offset = 0;
+            await loadTable();
+          }
+        }
+        if (payload.save_migration || isMigration) {
+          state.loaded.migrations = false;
+          if (state.view === 'migrations') await loadMigrations();
+        }
+      }, isMigration ? 'Migration was created.' : 'Table was created.');
+    }
+
+    async function deleteMigrationFile(item) {
+      item = item || filteredMigrations()[state.selectedMigration] || null;
+      if (!item) {
+        showOperation('warn', 'No migration selected', 'Select a migration first.');
+        return;
+      }
+      if (!item.deletable) {
+        showOperation('warn', 'Cannot delete', 'Only app migration files can be deleted from Inspector.');
+        return;
+      }
+      const warning = item.status === 'ran'
+        ? `This migration was already executed. Deleting ${item.file} only removes the file; history may become inconsistent.`
+        : `Delete migration file ${item.file}? This cannot be undone.`;
+      const ok = await askConfirm('Delete migration file?', warning, 'danger');
+      if (!ok) return;
+      await runWithLoading('Deleting migration', 'Removing ' + (item.file || item.name) + '.', async () => {
+        const result = await post('/api/migration/delete', {
+          name: item.name,
+          file: item.file,
+          path: item.absolute_path || item.path,
+        });
+        if (result.error || result.ok === false) {
+          throw new Error(result.message || 'Migration file could not be deleted.');
+        }
+        state.selectedMigration = 0;
+        await loadMigrations();
+      }, 'Migration file was deleted.');
+    }
+
     function renderTableTab(tab) {
       const payload = state.tablePayload || {};
       const browse = $('tableBrowsePanel');
@@ -1943,6 +2218,7 @@
             <button onclick="setMigrationDetailTab('sql')" class="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-left text-sm font-bold text-slate-200 hover:bg-white/10">Open SQL Preview</button>
             <button data-copy="${esc(item.file || item.name)}" onclick="copyText(this.dataset.copy)" class="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-left text-sm font-bold text-slate-200 hover:bg-white/10">Copy Migration Name</button>
             <button onclick="runInspectorAction('migrate')" class="rounded-xl bg-violet-500 px-4 py-3 text-left text-sm font-bold text-white hover:bg-violet-400">Run Pending Migrations</button>
+            ${item.deletable ? `<button onclick="deleteMigrationFile()" class="rounded-xl border border-rose-300/25 bg-rose-500/10 px-4 py-3 text-left text-sm font-bold text-rose-100 hover:bg-rose-500/20">Delete Migration File</button>` : ''}
           </div>
         </div>` : '';
       $('migrationDetails').innerHTML = `
@@ -1957,12 +2233,14 @@
         <div class="rounded-3xl border border-white/10 bg-[#091320]/90 p-4 shadow-[0_18px_70px_rgba(0,0,0,.22)]">
           <h3 class="font-bold text-white">Quick Actions</h3>
           <div class="mt-4 grid gap-2">
-            <button onclick="runInspectorAction('migrate')" class="rounded-xl bg-violet-500 px-4 py-3 text-left text-sm font-bold text-white hover:bg-violet-400">Run Pending</button>
+            <button onclick="openSchemaBuilder('migration')" class="rounded-xl bg-violet-500 px-4 py-3 text-left text-sm font-bold text-white hover:bg-violet-400">Create Migration</button>
+            <button onclick="runInspectorAction('migrate')" class="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-left text-sm font-bold text-slate-200 hover:bg-white/10">Run Pending</button>
             <button onclick="rollbackMigrations()" class="rounded-xl border border-amber-300/20 bg-amber-400/10 px-4 py-3 text-left text-sm font-bold text-amber-100 hover:bg-amber-400/20">Rollback Last Batch</button>
             <button onclick="rollbackMigrations(2)" class="rounded-xl border border-amber-300/20 bg-amber-400/10 px-4 py-3 text-left text-sm font-bold text-amber-100 hover:bg-amber-400/20">Rollback 2 Batches</button>
             <button onclick="resetMigrations()" class="rounded-xl border border-orange-300/20 bg-orange-400/10 px-4 py-3 text-left text-sm font-bold text-orange-100 hover:bg-orange-400/20">Reset All (down)</button>
             <button onclick="dropMigrationTables()" class="rounded-xl border border-rose-300/20 bg-rose-500/10 px-4 py-3 text-left text-sm font-bold text-rose-100 hover:bg-rose-500/20">Drop Tables</button>
             <button onclick="freshMigrations()" class="rounded-xl border border-rose-300/20 bg-rose-500/10 px-4 py-3 text-left text-sm font-bold text-rose-100 hover:bg-rose-500/20">Fresh (drop + migrate)</button>
+            ${item.deletable ? `<button onclick="deleteMigrationFile()" class="rounded-xl border border-rose-300/25 bg-rose-500/15 px-4 py-3 text-left text-sm font-bold text-rose-100 hover:bg-rose-500/25">Delete File</button>` : ''}
             <button onclick="refreshMigrations()" class="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-left text-sm font-bold text-slate-200 hover:bg-white/10">Refresh Status</button>
           </div>
         </div>
@@ -4593,7 +4871,13 @@
       }
     });
     document.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape') closeDetailDrawer();
+      if (event.key === 'Escape') {
+        if ($('schemaBuilderModal') && !$('schemaBuilderModal').classList.contains('hidden')) {
+          closeSchemaBuilder();
+          return;
+        }
+        closeDetailDrawer();
+      }
     });
     $('refresh').onclick = async () => {
       if (!ensureReady()) return;

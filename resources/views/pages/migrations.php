@@ -12,8 +12,9 @@
                   <span class="pointer-events-none absolute left-3 top-2.5 text-slate-500">?</span>
                   <input id="migrationSearch" class="ux-filter w-full pl-9" placeholder="Search migrations...">
                 </div>
+                <button onclick="openSchemaBuilder('migration')" class="ux-btn ux-btn-primary">Create Migration</button>
                 <button onclick="refreshMigrations()" class="ux-btn">Refresh</button>
-                <button onclick="runInspectorAction('migrate')" class="ux-btn ux-btn-primary">Run Pending</button>
+                <button onclick="runInspectorAction('migrate')" class="ux-btn">Run Pending</button>
                 <button onclick="rollbackMigrations()" class="ux-btn">Rollback</button>
                 <button onclick="freshMigrations()" class="ux-btn">Fresh</button>
               </div>

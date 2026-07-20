@@ -133,6 +133,50 @@ try {
         return;
     }
 
+    if ($path === '/api/table/create') {
+        if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
+            json_response(['error' => true, 'message' => 'POST is required.'], 405);
+            return;
+        }
+
+        $payload = json_decode((string) file_get_contents('php://input'), true);
+        json_response(create_table_payload($root, is_array($payload) ? $payload : []));
+        return;
+    }
+
+    if ($path === '/api/migration/preview') {
+        if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
+            json_response(['error' => true, 'message' => 'POST is required.'], 405);
+            return;
+        }
+
+        $payload = json_decode((string) file_get_contents('php://input'), true);
+        json_response(schema_migration_preview_payload($root, is_array($payload) ? $payload : []));
+        return;
+    }
+
+    if ($path === '/api/migration/create') {
+        if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
+            json_response(['error' => true, 'message' => 'POST is required.'], 405);
+            return;
+        }
+
+        $payload = json_decode((string) file_get_contents('php://input'), true);
+        json_response(create_migration_payload($root, is_array($payload) ? $payload : []));
+        return;
+    }
+
+    if ($path === '/api/migration/delete') {
+        if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
+            json_response(['error' => true, 'message' => 'POST is required.'], 405);
+            return;
+        }
+
+        $payload = json_decode((string) file_get_contents('php://input'), true);
+        json_response(delete_migration_payload($root, is_array($payload) ? $payload : []));
+        return;
+    }
+
     if ($path === '/api/query/raw') {
         if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
             json_response(['error' => true, 'message' => 'POST is required.'], 405);
@@ -1780,6 +1824,721 @@ function devdb_json_drop_table(string $root, string $table): array
     ];
 }
 
+/**
+ * @param array<string, mixed> $payload
+ * @return array<string, mixed>
+ */
+function create_table_payload(string $root, array $payload): array
+{
+    $schema = schema_definition_from_payload($root, $payload);
+    $preview = schema_migration_code($root, $schema);
+    $created = null;
+
+    if (!empty($payload['create_in_database']) || !array_key_exists('create_in_database', $payload)) {
+        $created = schema_create_table_in_database($root, $schema);
+    }
+
+    $saved = null;
+    if (!empty($payload['save_migration'])) {
+        $saved = schema_write_migration_file($root, $schema, $preview);
+    }
+
+    return [
+        'ok' => true,
+        'table' => $schema['logical_table'],
+        'physical_table' => $schema['physical_table'],
+        'engine' => engine($root),
+        'created' => $created,
+        'migration' => $preview,
+        'saved_migration' => $saved,
+        'message' => 'Table ' . $schema['physical_table'] . ' is ready.',
+    ];
+}
+
+/**
+ * @param array<string, mixed> $payload
+ * @return array<string, mixed>
+ */
+function schema_migration_preview_payload(string $root, array $payload): array
+{
+    $schema = schema_definition_from_payload($root, $payload);
+    $preview = schema_migration_code($root, $schema);
+
+    return [
+        'ok' => true,
+        'table' => $schema['logical_table'],
+        'physical_table' => $schema['physical_table'],
+        'migration' => $preview,
+        'message' => 'Migration preview generated.',
+    ];
+}
+
+/**
+ * @param array<string, mixed> $payload
+ * @return array<string, mixed>
+ */
+function create_migration_payload(string $root, array $payload): array
+{
+    $schema = schema_definition_from_payload($root, $payload);
+    $preview = schema_migration_code($root, $schema);
+    $saved = schema_write_migration_file($root, $schema, $preview);
+    $created = null;
+
+    if (!empty($payload['create_in_database'])) {
+        $created = schema_create_table_in_database($root, $schema);
+    }
+
+    return [
+        'ok' => true,
+        'table' => $schema['logical_table'],
+        'physical_table' => $schema['physical_table'],
+        'engine' => engine($root),
+        'created' => $created,
+        'migration' => $preview,
+        'saved_migration' => $saved,
+        'message' => 'Migration file was created.',
+    ];
+}
+
+/**
+ * @param array<string, mixed> $payload
+ * @return array<string, mixed>
+ */
+function delete_migration_payload(string $root, array $payload): array
+{
+    $path = trim((string) ($payload['path'] ?? $payload['absolute_path'] ?? ''));
+    $name = trim((string) ($payload['name'] ?? $payload['file'] ?? ''));
+
+    $file = null;
+    foreach (migration_files_payload($root) as $candidate) {
+        $absolute = (string) ($candidate['absolute_path'] ?? '');
+        $relative = (string) ($candidate['path'] ?? '');
+        $migration = (string) ($candidate['migration'] ?? pathinfo((string) ($candidate['name'] ?? ''), PATHINFO_FILENAME));
+        $basename = (string) ($candidate['name'] ?? '');
+
+        if ($path !== '' && ($absolute === normalize_path($path) || $relative === $path || basename($absolute) === basename($path))) {
+            $file = $candidate;
+            break;
+        }
+        if ($name !== '' && (migration_key($migration) === migration_key($name) || $basename === $name || $basename === $name . '.php')) {
+            $file = $candidate;
+            break;
+        }
+    }
+
+    if ($file === null) {
+        throw new RuntimeException('Migration file was not found.');
+    }
+
+    if (($file['scope'] ?? 'app') !== 'app') {
+        throw new RuntimeException('Only app migration files can be deleted from Inspector.');
+    }
+
+    $absolute = (string) ($file['absolute_path'] ?? '');
+    if ($absolute === '' || !is_file($absolute)) {
+        throw new RuntimeException('Migration file path is invalid.');
+    }
+
+    $allowed = false;
+    foreach (migration_sources($root) as $source) {
+        if (($source['scope'] ?? '') !== 'app') {
+            continue;
+        }
+        $dir = normalize_path((string) ($source['path'] ?? ''));
+        if ($dir !== '' && str_starts_with(normalize_path($absolute), $dir . '/')) {
+            $allowed = true;
+            break;
+        }
+    }
+    if (!$allowed) {
+        throw new RuntimeException('Migration file is outside the app migrations directory.');
+    }
+
+    if (!@unlink($absolute)) {
+        throw new RuntimeException('Unable to delete migration file.');
+    }
+
+    return [
+        'ok' => true,
+        'name' => (string) ($file['migration'] ?? pathinfo($absolute, PATHINFO_FILENAME)),
+        'file' => (string) ($file['name'] ?? basename($absolute)),
+        'path' => (string) ($file['path'] ?? $absolute),
+        'message' => 'Migration file was deleted.',
+    ];
+}
+
+/**
+ * @param array<string, mixed> $payload
+ * @return array{logical_table: string, physical_table: string, package: string, namespace: string, timestamps: bool, soft_deletes: bool, columns: list<array<string, mixed>>}
+ */
+function schema_definition_from_payload(string $root, array $payload): array
+{
+    $logical = schema_logical_table_name((string) ($payload['table'] ?? ''));
+    if ($logical === '') {
+        throw new RuntimeException('Table name is required.');
+    }
+
+    $package = inspector_app_package($root) ?? basename($root) ?: 'app';
+    $columns = schema_normalize_columns(is_array($payload['columns'] ?? null) ? $payload['columns'] : []);
+    $timestamps = array_key_exists('timestamps', $payload) ? (bool) $payload['timestamps'] : true;
+    $softDeletes = !empty($payload['soft_deletes']);
+
+    if ($columns === []) {
+        $columns = [
+            ['name' => 'id', 'type' => 'id', 'nullable' => false, 'unique' => false, 'index' => false, 'default' => null, 'length' => null, 'references' => null],
+        ];
+    }
+
+    $hasId = false;
+    foreach ($columns as $column) {
+        if (($column['type'] ?? '') === 'id' || (($column['name'] ?? '') === 'id' && ($column['type'] ?? '') === 'bigIncrements')) {
+            $hasId = true;
+            break;
+        }
+    }
+    if (!$hasId) {
+        array_unshift($columns, ['name' => 'id', 'type' => 'id', 'nullable' => false, 'unique' => false, 'index' => false, 'default' => null, 'length' => null, 'references' => null]);
+    }
+
+    return [
+        'logical_table' => $logical,
+        'physical_table' => migration_physical_table_name($root, $logical, $package),
+        'package' => $package,
+        'namespace' => $package === 'platform'
+            ? 'Pinoox\\Database\\migrations'
+            : 'App\\' . $package . '\\database\\migrations',
+        'timestamps' => $timestamps,
+        'soft_deletes' => $softDeletes,
+        'columns' => $columns,
+    ];
+}
+
+/**
+ * @param list<mixed> $columns
+ * @return list<array<string, mixed>>
+ */
+function schema_normalize_columns(array $columns): array
+{
+    $normalized = [];
+    $allowed = ['id', 'bigIncrements', 'string', 'text', 'mediumText', 'longText', 'integer', 'bigInteger', 'unsignedBigInteger', 'boolean', 'decimal', 'float', 'double', 'date', 'dateTime', 'timestamp', 'json', 'uuid', 'foreignId'];
+
+    foreach ($columns as $column) {
+        if (!is_array($column)) {
+            continue;
+        }
+        $type = (string) ($column['type'] ?? 'string');
+        if (!in_array($type, $allowed, true)) {
+            $type = 'string';
+        }
+        $name = trim((string) ($column['name'] ?? ''));
+        if ($type === 'id') {
+            $name = $name !== '' ? $name : 'id';
+        }
+        if ($name === '' || !preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $name)) {
+            continue;
+        }
+        $length = $column['length'] ?? null;
+        $length = is_numeric($length) ? (int) $length : null;
+        $normalized[] = [
+            'name' => $name,
+            'type' => $type,
+            'nullable' => !empty($column['nullable']),
+            'unique' => !empty($column['unique']),
+            'index' => !empty($column['index']),
+            'default' => array_key_exists('default', $column) && $column['default'] !== '' ? $column['default'] : null,
+            'length' => $length,
+            'precision' => is_numeric($column['precision'] ?? null) ? (int) $column['precision'] : null,
+            'scale' => is_numeric($column['scale'] ?? null) ? (int) $column['scale'] : null,
+            'references' => trim((string) ($column['references'] ?? '')) ?: null,
+        ];
+    }
+
+    return $normalized;
+}
+
+function schema_logical_table_name(string $name): string
+{
+    $name = strtolower(trim((string) preg_replace('/[^A-Za-z0-9_]+/', '_', $name)));
+    $name = trim($name, '_');
+    if (str_starts_with($name, 'create_')) {
+        $name = substr($name, 7);
+    }
+    if (str_ends_with($name, '_table')) {
+        $name = substr($name, 0, -6);
+    }
+
+    return trim($name, '_');
+}
+
+/**
+ * @param array<string, mixed> $schema
+ * @return array{code: string, filename: string, classname: string, table: string}
+ */
+function schema_migration_code(string $root, array $schema): array
+{
+    $logical = (string) $schema['logical_table'];
+    $filename = date('Y_m_d_His') . '_create_' . $logical . '_table.php';
+    $lines = schema_blueprint_php_lines($schema);
+    $blueprint = implode("\n", array_map(static fn (string $line): string => '            ' . $line, $lines));
+    $copyright = schema_copyright_block($root);
+    $namespace = (string) $schema['namespace'];
+
+    $code = <<<PHP
+<?php
+{$copyright}
+
+namespace {$namespace};
+
+use Illuminate\Database\Schema\Blueprint;
+use Pinoox\Component\Migration\MigrationBase;
+
+return new class extends MigrationBase
+{
+	/**
+	 * Run the migrations.
+	 */
+    public function up()
+    {
+        \$this->schema->create(\$this->table('{$logical}'), function (Blueprint \$table) {
+{$blueprint}
+        });
+    }
+
+	/**
+	 * Reverse the migrations.
+	 */
+	public function down(): void
+	{
+		\$this->schema->dropIfExists(\$this->table('{$logical}'));
+	}
+};
+
+PHP;
+
+    return [
+        'code' => $code,
+        'filename' => $filename,
+        'classname' => pathinfo($filename, PATHINFO_FILENAME),
+        'table' => $logical,
+    ];
+}
+
+/**
+ * @param array<string, mixed> $schema
+ * @return list<string>
+ */
+function schema_blueprint_php_lines(array $schema): array
+{
+    $lines = [];
+    foreach ($schema['columns'] as $column) {
+        $name = (string) $column['name'];
+        $type = (string) $column['type'];
+        $line = match ($type) {
+            'id' => $name === 'id' ? '$table->id();' : '$table->id(\'' . $name . '\');',
+            'bigIncrements' => '$table->bigIncrements(\'' . $name . '\');',
+            'string' => '$table->string(\'' . $name . '\'' . (!empty($column['length']) ? ', ' . (int) $column['length'] : '') . ')',
+            'text' => '$table->text(\'' . $name . '\')',
+            'mediumText' => '$table->mediumText(\'' . $name . '\')',
+            'longText' => '$table->longText(\'' . $name . '\')',
+            'integer' => '$table->integer(\'' . $name . '\')',
+            'bigInteger' => '$table->bigInteger(\'' . $name . '\')',
+            'unsignedBigInteger' => '$table->unsignedBigInteger(\'' . $name . '\')',
+            'boolean' => '$table->boolean(\'' . $name . '\')',
+            'decimal' => '$table->decimal(\'' . $name . '\', ' . (int) ($column['precision'] ?: 8) . ', ' . (int) ($column['scale'] ?: 2) . ')',
+            'float' => '$table->float(\'' . $name . '\')',
+            'double' => '$table->double(\'' . $name . '\')',
+            'date' => '$table->date(\'' . $name . '\')',
+            'dateTime' => '$table->dateTime(\'' . $name . '\')',
+            'timestamp' => '$table->timestamp(\'' . $name . '\')',
+            'json' => '$table->json(\'' . $name . '\')',
+            'uuid' => '$table->uuid(\'' . $name . '\')',
+            'foreignId' => '$table->foreignId(\'' . $name . '\')',
+            default => '$table->string(\'' . $name . '\')',
+        };
+
+        if (in_array($type, ['id', 'bigIncrements'], true)) {
+            $lines[] = $line;
+            continue;
+        }
+
+        if ($type === 'foreignId') {
+            $ref = (string) ($column['references'] ?? '');
+            if ($ref !== '') {
+                $line .= '->constrained(\'' . $ref . '\')';
+            } else {
+                $line .= '->constrained()';
+            }
+            if (!empty($column['nullable'])) {
+                $line .= '->nullable()';
+            }
+            $lines[] = $line . ';';
+            continue;
+        }
+
+        if (!empty($column['nullable'])) {
+            $line .= '->nullable()';
+        }
+        if (!empty($column['unique'])) {
+            $line .= '->unique()';
+        } elseif (!empty($column['index'])) {
+            $line .= '->index()';
+        }
+        if ($column['default'] !== null) {
+            $default = $column['default'];
+            if (is_bool($default)) {
+                $line .= '->default(' . ($default ? 'true' : 'false') . ')';
+            } elseif (is_numeric($default) && !is_string($default)) {
+                $line .= '->default(' . $default . ')';
+            } elseif (is_numeric($default) && preg_match('/^-?\d+(\.\d+)?$/', (string) $default)) {
+                $line .= '->default(' . $default . ')';
+            } else {
+                $line .= '->default(\'' . addslashes((string) $default) . '\')';
+            }
+        }
+        $lines[] = $line . ';';
+    }
+
+    if (!empty($schema['timestamps'])) {
+        $lines[] = '$table->timestamps();';
+    }
+    if (!empty($schema['soft_deletes'])) {
+        $lines[] = '$table->softDeletes();';
+    }
+
+    return $lines;
+}
+
+function schema_copyright_block(string $root): string
+{
+    $pincore = resolve_pincore_path($root);
+    $stub = $pincore !== null ? $pincore . '/stubs/copyright.stub' : '';
+    if ($stub !== '' && is_file($stub)) {
+        $content = trim((string) file_get_contents($stub));
+        if ($content !== '') {
+            return $content;
+        }
+    }
+
+    return <<<'TXT'
+/**
+ * @author   Pinoox
+ * @link https://www.pinoox.com
+ * @license  https://opensource.org/licenses/MIT MIT License
+ */
+TXT;
+}
+
+/**
+ * @param array<string, mixed> $schema
+ * @param array{code: string, filename: string, classname: string, table: string} $preview
+ * @return array{ok: bool, path: string, absolute_path: string, filename: string}
+ */
+function schema_write_migration_file(string $root, array $schema, array $preview): array
+{
+    $dir = schema_app_migrations_dir($root);
+    if (!is_dir($dir) && !@mkdir($dir, 0775, true) && !is_dir($dir)) {
+        throw new RuntimeException('Unable to create migrations directory: ' . $dir);
+    }
+
+    $filename = (string) $preview['filename'];
+    $absolute = normalize_path($dir . '/' . $filename);
+    if (is_file($absolute)) {
+        throw new RuntimeException('Migration file already exists: ' . $filename);
+    }
+
+    if (file_put_contents($absolute, $preview['code']) === false) {
+        throw new RuntimeException('Unable to write migration file.');
+    }
+
+    $relative = ltrim(str_replace(normalize_path($root), '', $absolute), '/');
+
+    return [
+        'ok' => true,
+        'path' => $relative,
+        'absolute_path' => $absolute,
+        'filename' => $filename,
+    ];
+}
+
+function schema_app_migrations_dir(string $root): string
+{
+    foreach (['/database/migrations', '/Database/migrations', '/migrations'] as $suffix) {
+        $path = normalize_path($root . $suffix);
+        if (is_dir($path)) {
+            return $path;
+        }
+    }
+
+    return normalize_path($root . '/database/migrations');
+}
+
+/**
+ * @param array<string, mixed> $schema
+ * @return array{ok: bool, table: string, engine: string, message: string}
+ */
+function schema_create_table_in_database(string $root, array $schema): array
+{
+    $physical = (string) $schema['physical_table'];
+    $existing = safe_tables_payload($root)['tables'] ?? [];
+    foreach ($existing as $table) {
+        if (($table['name'] ?? '') === $physical) {
+            throw new RuntimeException('Table "' . $physical . '" already exists.');
+        }
+    }
+
+    return match (engine($root)) {
+        'mysql' => pdo_create_table_from_schema($root, 'mysql', $schema),
+        'pgsql' => pdo_create_table_from_schema($root, 'pgsql', $schema),
+        'sqlite' => pdo_create_table_from_schema($root, 'sqlite', $schema),
+        'devdb-sqlite' => pdo_create_table_from_schema($root, 'sqlite', $schema, true),
+        default => devdb_json_create_table_from_schema($root, $schema),
+    };
+}
+
+/**
+ * @param array<string, mixed> $schema
+ * @return array{ok: bool, table: string, engine: string, message: string}
+ */
+function pdo_create_table_from_schema(string $root, string $driver, array $schema, bool $devdbSqlite = false): array
+{
+    $pdo = $devdbSqlite ? sqlite_pdo($root) : pdo_for_connection($root, $driver);
+    $sql = schema_create_table_sql($root, $driver, $schema);
+    $pdo->exec($sql);
+
+    return [
+        'ok' => true,
+        'table' => (string) $schema['physical_table'],
+        'engine' => $devdbSqlite ? 'devdb-sqlite' : $driver,
+        'message' => 'Table ' . $schema['physical_table'] . ' was created.',
+    ];
+}
+
+/**
+ * @param array<string, mixed> $schema
+ */
+function schema_create_table_sql(string $root, string $driver, array $schema): string
+{
+    $table = (string) $schema['physical_table'];
+    $quotedTable = $driver === 'sqlite' ? quote_identifier($table) : quote_identifier_for($driver, $table);
+    $parts = [];
+    $primary = null;
+
+    foreach ($schema['columns'] as $column) {
+        $parts[] = schema_column_sql($driver, $column, $primary);
+    }
+
+    if (!empty($schema['timestamps'])) {
+        $parts[] = schema_timestamp_columns_sql($driver);
+    }
+    if (!empty($schema['soft_deletes'])) {
+        $parts[] = schema_soft_delete_column_sql($driver);
+    }
+
+    if ($primary !== null && $driver !== 'sqlite') {
+        $parts[] = 'PRIMARY KEY (' . quote_identifier_for($driver, $primary) . ')';
+    }
+
+    foreach ($schema['columns'] as $column) {
+        if (($column['type'] ?? '') !== 'foreignId') {
+            continue;
+        }
+        $ref = schema_logical_table_name((string) ($column['references'] ?? preg_replace('/_id$/', '', (string) $column['name'])));
+        if ($ref === '') {
+            continue;
+        }
+        $refTable = migration_physical_table_name($root, $ref, (string) ($schema['package'] ?? 'app')) ?: $ref;
+        $quoteCol = static fn (string $value): string => $driver === 'sqlite' ? quote_identifier($value) : quote_identifier_for($driver, $value);
+        $parts[] = 'FOREIGN KEY (' . $quoteCol((string) $column['name']) . ') REFERENCES '
+            . $quoteCol($refTable)
+            . ' (' . $quoteCol('id') . ')';
+    }
+
+    $body = implode(",\n  ", array_filter($parts));
+
+    return "CREATE TABLE {$quotedTable} (\n  {$body}\n)";
+}
+
+/**
+ * @param array<string, mixed> $column
+ */
+function schema_column_sql(string $driver, array $column, ?string &$primary): string
+{
+    $name = (string) $column['name'];
+    $quoted = $driver === 'sqlite' ? quote_identifier($name) : quote_identifier_for($driver, $name);
+    $type = (string) $column['type'];
+    $nullable = !empty($column['nullable']);
+    $unique = !empty($column['unique']);
+    $default = $column['default'] ?? null;
+
+    if ($type === 'id' || $type === 'bigIncrements') {
+        $primary = $name;
+        return match ($driver) {
+            'mysql' => $quoted . ' BIGINT UNSIGNED NOT NULL AUTO_INCREMENT',
+            'pgsql' => $quoted . ' BIGSERIAL NOT NULL',
+            default => $quoted . ' INTEGER PRIMARY KEY AUTOINCREMENT',
+        };
+    }
+
+    $sqlType = match ($type) {
+        'string' => $driver === 'pgsql'
+            ? 'VARCHAR(' . (int) ($column['length'] ?: 255) . ')'
+            : ($driver === 'sqlite' ? 'TEXT' : 'VARCHAR(' . (int) ($column['length'] ?: 255) . ')'),
+        'text', 'mediumText', 'longText' => $driver === 'mysql' && $type !== 'text' ? strtoupper($type === 'mediumText' ? 'MEDIUMTEXT' : 'LONGTEXT') : 'TEXT',
+        'integer' => $driver === 'pgsql' ? 'INTEGER' : ($driver === 'sqlite' ? 'INTEGER' : 'INT'),
+        'bigInteger', 'unsignedBigInteger', 'foreignId' => $driver === 'mysql'
+            ? ($type === 'unsignedBigInteger' || $type === 'foreignId' ? 'BIGINT UNSIGNED' : 'BIGINT')
+            : ($driver === 'pgsql' ? 'BIGINT' : 'INTEGER'),
+        'boolean' => $driver === 'pgsql' ? 'BOOLEAN' : ($driver === 'sqlite' ? 'INTEGER' : 'TINYINT(1)'),
+        'decimal' => 'DECIMAL(' . (int) ($column['precision'] ?: 8) . ',' . (int) ($column['scale'] ?: 2) . ')',
+        'float' => 'FLOAT',
+        'double' => 'DOUBLE PRECISION',
+        'date' => 'DATE',
+        'dateTime' => $driver === 'pgsql' ? 'TIMESTAMP WITHOUT TIME ZONE' : 'DATETIME',
+        'timestamp' => $driver === 'pgsql' ? 'TIMESTAMP WITHOUT TIME ZONE' : 'TIMESTAMP',
+        'json' => $driver === 'mysql' ? 'JSON' : 'TEXT',
+        'uuid' => $driver === 'pgsql' ? 'UUID' : 'CHAR(36)',
+        default => 'TEXT',
+    };
+
+    $sql = $quoted . ' ' . $sqlType;
+    $sql .= $nullable ? ' NULL' : ' NOT NULL';
+
+    if ($default !== null) {
+        if (is_bool($default) || $default === 'true' || $default === 'false') {
+            $bool = $default === true || $default === 'true';
+            $sql .= ' DEFAULT ' . ($driver === 'pgsql' ? ($bool ? 'TRUE' : 'FALSE') : ($bool ? '1' : '0'));
+        } elseif (is_numeric($default)) {
+            $sql .= ' DEFAULT ' . $default;
+        } else {
+            $sql .= " DEFAULT '" . str_replace("'", "''", (string) $default) . "'";
+        }
+    }
+
+    if ($unique) {
+        $sql .= ' UNIQUE';
+    }
+
+    return $sql;
+}
+
+function schema_timestamp_columns_sql(string $driver): string
+{
+    if ($driver === 'sqlite') {
+        return '"created_at" TEXT NULL, "updated_at" TEXT NULL';
+    }
+    if ($driver === 'pgsql') {
+        return '"created_at" TIMESTAMP WITHOUT TIME ZONE NULL, "updated_at" TIMESTAMP WITHOUT TIME ZONE NULL';
+    }
+
+    return '`created_at` TIMESTAMP NULL, `updated_at` TIMESTAMP NULL';
+}
+
+function schema_soft_delete_column_sql(string $driver): string
+{
+    if ($driver === 'sqlite') {
+        return '"deleted_at" TEXT NULL';
+    }
+    if ($driver === 'pgsql') {
+        return '"deleted_at" TIMESTAMP WITHOUT TIME ZONE NULL';
+    }
+
+    return '`deleted_at` TIMESTAMP NULL';
+}
+
+/**
+ * @param array<string, mixed> $schema
+ * @return array{ok: bool, table: string, engine: string, message: string}
+ */
+function devdb_json_create_table_from_schema(string $root, array $schema): array
+{
+    $table = (string) $schema['physical_table'];
+    $columns = [];
+    $primary = null;
+    $foreignKeys = [];
+
+    foreach ($schema['columns'] as $column) {
+        $name = (string) $column['name'];
+        $type = (string) $column['type'];
+        $columns[$name] = [
+            'type' => schema_devdb_column_type($type, $column),
+            'nullable' => in_array($type, ['id', 'bigIncrements'], true) ? false : !empty($column['nullable']),
+            'primary' => in_array($type, ['id', 'bigIncrements'], true),
+            'auto_increment' => in_array($type, ['id', 'bigIncrements'], true),
+            'default' => $column['default'] ?? null,
+        ];
+        if (in_array($type, ['id', 'bigIncrements'], true)) {
+            $primary = $name;
+            $columns[$name]['nullable'] = false;
+        }
+        if ($type === 'foreignId') {
+            $ref = schema_logical_table_name((string) ($column['references'] ?? preg_replace('/_id$/', '', $name)));
+            if ($ref !== '') {
+                $foreignKeys[] = [
+                    'column' => $name,
+                    'references_table' => $ref,
+                    'references_column' => 'id',
+                ];
+            }
+        }
+    }
+
+    if (!empty($schema['timestamps'])) {
+        $columns['created_at'] = ['type' => 'timestamp', 'nullable' => true, 'primary' => false, 'default' => null];
+        $columns['updated_at'] = ['type' => 'timestamp', 'nullable' => true, 'primary' => false, 'default' => null];
+    }
+    if (!empty($schema['soft_deletes'])) {
+        $columns['deleted_at'] = ['type' => 'timestamp', 'nullable' => true, 'primary' => false, 'default' => null];
+    }
+
+    $schemaPath = devdb_path($root) . '/schema.json';
+    locked_json_update($schemaPath, ['tables' => []], static function (array $data) use ($table, $columns, $primary, $foreignKeys): array {
+        if (!isset($data['tables']) || !is_array($data['tables'])) {
+            $data['tables'] = [];
+        }
+        $data['tables'][$table] = [
+            'columns' => $columns,
+            'primary_key' => $primary,
+            'indexes' => [],
+            'foreign_keys' => $foreignKeys,
+        ];
+        return $data;
+    });
+
+    $dataPath = devdb_path($root) . '/data/' . safe_table_file($table) . '.json';
+    if (!is_file($dataPath)) {
+        locked_json_update($dataPath, [], static fn (): array => []);
+    }
+
+    return [
+        'ok' => true,
+        'table' => $table,
+        'engine' => 'devdb-json',
+        'message' => 'Table ' . $table . ' was created.',
+    ];
+}
+
+/**
+ * @param array<string, mixed> $column
+ */
+function schema_devdb_column_type(string $type, array $column): string
+{
+    return match ($type) {
+        'id', 'bigIncrements', 'bigInteger', 'unsignedBigInteger', 'foreignId' => 'bigint',
+        'integer' => 'integer',
+        'string' => 'string(' . (int) ($column['length'] ?: 255) . ')',
+        'text', 'mediumText', 'longText' => 'text',
+        'boolean' => 'boolean',
+        'decimal' => 'decimal',
+        'float', 'double' => 'float',
+        'date' => 'date',
+        'dateTime' => 'datetime',
+        'timestamp' => 'timestamp',
+        'json' => 'json',
+        'uuid' => 'uuid',
+        default => 'string',
+    };
+}
+
 function raw_query_payload(string $root, array $payload): array
 {
     $sql = trim((string) ($payload['sql'] ?? ''));
@@ -3353,6 +4112,8 @@ function migration_item_payload(string $name, ?array $file, array $state): array
         'name' => $name,
         'file' => (string) ($file['name'] ?? ($name . '.php')),
         'path' => (string) ($file['path'] ?? ''),
+        'absolute_path' => (string) ($file['absolute_path'] ?? ''),
+        'deletable' => (($file['scope'] ?? 'app') === 'app') && !empty($file['absolute_path']),
         'package' => (string) ($state['package'] ?? ($file['scope'] ?? 'app')),
         'batch' => $state['batch'] ?? null,
         'status' => (string) ($state['status'] ?? 'pending'),

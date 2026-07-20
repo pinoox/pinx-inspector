@@ -6,6 +6,7 @@
             <p class="ux-page-copy">Browse data, inspect schema, add development rows, and review relations from the active Pinoox connection.</p>
           </div>
           <div class="ux-actions">
+            <button onclick="openSchemaBuilder('table')" class="ux-btn ux-btn-primary">Add Table</button>
             <button onclick="loadTables()" class="ux-btn">Refresh</button>
             <button onclick="runInspectorAction('migrate')" class="ux-btn ux-btn-success">Run Migrations</button>
           </div>
