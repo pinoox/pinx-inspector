@@ -7,6 +7,7 @@
     <main class="min-w-0 p-4 pb-16">
       <?= inspector_view('layout/header.php') ?>
       <?= inspector_view('pages/dashboard.php') ?>
+      <?= inspector_view('pages/setup.php') ?>
       <?= inspector_view('pages/connections.php') ?>
       <?= inspector_view('pages/database.php') ?>
       <?= inspector_view('pages/query.php') ?>

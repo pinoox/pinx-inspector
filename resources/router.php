@@ -142,6 +142,11 @@ try {
         return;
     }
 
+    if ($path === '/api/setup') {
+        json_response(setup_payload($root));
+        return;
+    }
+
     if ($path === '/api/routes') {
         json_response(routes_payload($root));
         return;
@@ -368,6 +373,21 @@ try {
             }
             if (!empty($payload['clear'])) {
                 $extraArgs[] = '--clear';
+            }
+            if (!empty($payload['db_only'])) {
+                $extraArgs[] = '--db-only';
+            }
+            if (!empty($payload['skip_deps'])) {
+                $extraArgs[] = '--skip-deps';
+            }
+            if (!empty($payload['skip_frontend'])) {
+                $extraArgs[] = '--skip-frontend';
+            }
+            if (!empty($payload['skip_seed'])) {
+                $extraArgs[] = '--skip-seed';
+            }
+            if (!empty($payload['skip_patch'])) {
+                $extraArgs[] = '--skip-patch';
             }
         }
         json_response(inspector_action_payload($root, $action, $extraArgs));
@@ -2298,6 +2318,7 @@ function cli_actions(): array
         ['id' => 'patch_run', 'label' => 'Run Patches', 'description' => 'Run pending data patches', 'command' => 'patch:run'],
         ['id' => 'patch_rollback', 'label' => 'Rollback Patches', 'description' => 'Rollback the latest rollbackable patch', 'command' => 'patch:rollback'],
         ['id' => 'patch_reset', 'label' => 'Reset Patches', 'description' => 'Rollback all rollbackable patches', 'command' => 'patch:reset --force'],
+        ['id' => 'setup', 'label' => 'Project Setup', 'description' => 'Install deps, migrate, seed, and patch', 'command' => 'setup --yes'],
     ];
 }
 
@@ -2330,6 +2351,7 @@ function run_cli_action(string $root, string $action, array $extraArgs = []): ar
         'patch_run' => ['patch:run', '--no-ansi'],
         'patch_rollback' => ['patch:rollback', '--no-ansi'],
         'patch_reset' => ['patch:reset', '--force', '--no-ansi'],
+        'setup' => ['setup', '--yes', '--no-ansi'],
         'user_list' => ['user:list', '--json', '-n', '--no-ansi'],
         'user_login' => ['user:login', '--json', '-n', '--no-ansi'],
         'user_logout' => ['user:logout', '--json', '-n', '--no-ansi'],
@@ -2418,6 +2440,7 @@ function inspector_action_payload(string $root, string $action, array $extraArgs
     $allowed = [
         'doctor', 'migrate', 'migrate_rollback', 'migrate_reset', 'migrate_drop', 'migrate_fresh', 'migrate_status',
         'patch_status', 'patch_run', 'patch_rollback', 'patch_reset',
+        'setup',
         'routes', 'devdb_status', 'deps_status', 'pinker_status', 'pinker_rebuild', 'pinker_clear',
         'build', 'build_sign', 'release_patch', 'schedule_list', 'schedule_run',
     ];
@@ -2458,6 +2481,7 @@ function inspector_action_title(string $action): string
         'patch_run' => 'Patch run finished',
         'patch_rollback' => 'Patch rollback finished',
         'patch_reset' => 'Patch reset finished',
+        'setup' => 'Project setup finished',
         'routes' => 'Route map refreshed',
         'devdb_status' => 'DevDB status refreshed',
         'deps_status' => 'Dependency check finished',
@@ -2492,6 +2516,7 @@ function inspector_action_message(string $action, bool $ok, string $stdout, stri
         'patch_run' => 'Pending data patches were executed.',
         'patch_rollback' => 'Patch rollback finished. Refresh the Patches page to see the current state.',
         'patch_reset' => 'Rollbackable patches were reset.',
+        'setup' => 'Dependencies, migrations, seeders, and patches were processed for the active app.',
         'pinker_rebuild' => 'Pinker cache was rebuilt from the app manifest and route files.',
         'pinker_clear' => 'Pinker cache clear command finished.',
         'build' => 'The .pinx package build command finished. Check the Build & Release page for release files.',
@@ -2682,6 +2707,100 @@ function patches_payload(string $root): array
         'items' => $items,
         'message' => $items === [] ? 'No patch files were found yet.' : 'Patch state is ready.',
         'raw' => $status,
+    ];
+}
+
+function setup_payload(string $root): array
+{
+    $migrations = [];
+    $patches = [];
+    $deps = null;
+    $health = null;
+
+    try {
+        $migrations = migrations_payload($root);
+    } catch (Throwable) {
+        $migrations = ['summary' => ['pending' => 0, 'ran' => 0, 'total' => 0], 'ok' => false];
+    }
+
+    try {
+        $patches = patches_payload($root);
+    } catch (Throwable) {
+        $patches = ['summary' => ['pending' => 0, 'ran' => 0, 'total' => 0, 'rollbackable' => 0], 'ok' => false];
+    }
+
+    try {
+        $deps = command_payload($root, 'deps_status');
+    } catch (Throwable) {
+        $deps = ['ok' => false, 'output' => '', 'error' => 'Dependency status is unavailable.'];
+    }
+
+    try {
+        $health = health_payload($root);
+    } catch (Throwable) {
+        $health = ['ok' => false, 'score' => 0];
+    }
+
+    $migrationPending = (int) ($migrations['summary']['pending'] ?? 0);
+    $patchPending = (int) ($patches['summary']['pending'] ?? 0);
+    $needsAttention = $migrationPending > 0 || $patchPending > 0 || empty($health['ok']);
+
+    $steps = [
+        [
+            'id' => 'deps',
+            'label' => 'Dependencies',
+            'description' => 'Install Composer packages and npm packages for themes',
+            'default' => true,
+            'flag' => 'skip_deps',
+        ],
+        [
+            'id' => 'frontend',
+            'label' => 'Frontend npm',
+            'description' => 'Include theme npm installs with dependencies',
+            'default' => true,
+            'flag' => 'skip_frontend',
+        ],
+        [
+            'id' => 'migrate',
+            'label' => 'Migrations',
+            'description' => 'Run platform and app database migrations',
+            'default' => true,
+            'required' => true,
+        ],
+        [
+            'id' => 'seed',
+            'label' => 'Seeders',
+            'description' => 'Load platform and app seed data',
+            'default' => true,
+            'flag' => 'skip_seed',
+        ],
+        [
+            'id' => 'patch',
+            'label' => 'Patches',
+            'description' => 'Apply pending data patches',
+            'default' => true,
+            'flag' => 'skip_patch',
+        ],
+    ];
+
+    return [
+        'ok' => true,
+        'needs_attention' => $needsAttention,
+        'ready_label' => $needsAttention ? 'Needs setup' : 'Looking good',
+        'summary' => [
+            'migrations_pending' => $migrationPending,
+            'migrations_ran' => (int) ($migrations['summary']['ran'] ?? 0),
+            'patches_pending' => $patchPending,
+            'patches_ran' => (int) ($patches['summary']['ran'] ?? 0),
+            'health_score' => (int) ($health['score'] ?? 0),
+            'health_ok' => (bool) ($health['ok'] ?? false),
+            'deps_ok' => (bool) ($deps['ok'] ?? false),
+        ],
+        'steps' => $steps,
+        'command' => 'pinx setup --yes',
+        'message' => $needsAttention
+            ? 'Run setup to install dependencies and apply pending database changes.'
+            : 'Project looks ready. You can still re-run setup safely for pending steps.',
     ];
 }
 

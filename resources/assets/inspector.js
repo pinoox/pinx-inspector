@@ -1,4 +1,4 @@
-    const state = { selected: null, selectedRowKeys: [], limit: 50, offset: 0, search: '', tableFilter: '', view: 'dashboard', tables: [], database: null, selectedConnectionIndex: 0, connectionDetailTab: 'details', queryTable: '', queryColumns: [], querySelectedColumns: [], queryConditions: [], queryRows: [], queryBuilderMode: 'builder', queryPanelTab: 'results', queryLastPayload: null, queryLastExecutedAt: '', queryHistory: [], queryRawSql: '', queryRawResult: null, savedQueries: [], routes: null, routeSearch: '', routeGroup: 'all', selectedRoute: 0, selectedAction: 0, flow: null, flowSearch: '', flowTab: 'flow', flowType: 'all', flowStatus: 'all', flowGroup: 'web', selectedFlow: 0, migrations: null, migrationSearch: '', migrationStatus: 'all', selectedMigration: 0, migrationDetailTab: 'sql', migrationActionMenu: null, patches: null, patchSearch: '', patchStatus: 'all', selectedPatch: 0, patchActionMenu: null, schedule: null, scheduleSearch: '', scheduleStatus: 'all', selectedSchedule: 0, logs: null, logSearch: '', logLevel: 'all', selectedLog: 0, logLive: false, themes: null, themeSearch: '', selectedTheme: 0, users: null, userSearch: '', userStatus: 'all', selectedUser: 0, lastLogin: null, pinker: null, pinkerTab: 'overview', build: null, views: null, viewSearch: '', viewType: 'all', selectedView: 0, viewEditing: false, lang: null, langSearch: '', langScope: 'all', langLocale: 'all', langSyncReference: 'en', selectedLang: 0, langEditing: false, env: null, config: null, configSearch: '', configCategory: 'all', selectedConfig: 0, configEditing: false, busy: false, ready: false, loaded: {}, loading: {}, platform: false, locked: false, selectable: false, activePackage: '', apps: [] };
+    const state = { selected: null, selectedRowKeys: [], limit: 50, offset: 0, search: '', tableFilter: '', view: 'dashboard', tables: [], database: null, selectedConnectionIndex: 0, connectionDetailTab: 'details', queryTable: '', queryColumns: [], querySelectedColumns: [], queryConditions: [], queryRows: [], queryBuilderMode: 'builder', queryPanelTab: 'results', queryLastPayload: null, queryLastExecutedAt: '', queryHistory: [], queryRawSql: '', queryRawResult: null, savedQueries: [], routes: null, routeSearch: '', routeGroup: 'all', selectedRoute: 0, selectedAction: 0, flow: null, flowSearch: '', flowTab: 'flow', flowType: 'all', flowStatus: 'all', flowGroup: 'web', selectedFlow: 0, migrations: null, migrationSearch: '', migrationStatus: 'all', selectedMigration: 0, migrationDetailTab: 'sql', migrationActionMenu: null, patches: null, patchSearch: '', patchStatus: 'all', selectedPatch: 0, patchActionMenu: null, setup: null, setupOptions: { deps: true, frontend: true, seed: true, patch: true }, setupRunning: false, schedule: null, scheduleSearch: '', scheduleStatus: 'all', selectedSchedule: 0, logs: null, logSearch: '', logLevel: 'all', selectedLog: 0, logLive: false, themes: null, themeSearch: '', selectedTheme: 0, users: null, userSearch: '', userStatus: 'all', selectedUser: 0, lastLogin: null, pinker: null, pinkerTab: 'overview', build: null, views: null, viewSearch: '', viewType: 'all', selectedView: 0, viewEditing: false, lang: null, langSearch: '', langScope: 'all', langLocale: 'all', langSyncReference: 'en', selectedLang: 0, langEditing: false, env: null, config: null, configSearch: '', configCategory: 'all', selectedConfig: 0, configEditing: false, busy: false, ready: false, loaded: {}, loading: {}, platform: false, locked: false, selectable: false, activePackage: '', apps: [] };
     const $ = (id) => document.getElementById(id);
     const base = location.pathname.startsWith('/~inspector') ? '/~inspector' : '';
     const packageStorageKey = 'pinx.inspector.package';
@@ -229,6 +229,10 @@
       } else if (view === 'health') {
         setHtml('healthSummary', loadingPanel('Running health scan', 'Checking local project health.'));
         setHtml('healthContent', '');
+      } else if (view === 'setup') {
+        setHtml('setupStatusCards', compactLoading('Loading setup status'));
+        setHtml('setupProgressList', compactLoading('Preparing setup steps'));
+        setHtml('setupStepOptions', compactLoading('Loading options'));
       } else if (view === 'migrations') {
         setHtml('migrationsContent', loadingPanel('Loading migrations', 'Reading migration files and execution status.'));
         setHtml('migrationDetails', compactLoading('Loading migration details'));
@@ -1847,6 +1851,107 @@
       const ok = await askConfirm('Reset patches?', 'This rolls back every successful patch that supports down().', 'danger');
       if (!ok) return;
       await runInspectorAction('patch_reset', { force: true });
+    }
+
+    async function loadSetup() {
+      const payload = await api('/api/setup');
+      state.setup = payload;
+      renderSetup();
+    }
+
+    async function refreshSetup() {
+      await runWithLoading('Refreshing setup', 'Checking migrations, patches, and project readiness.', async () => {
+        await loadSetup();
+      }, 'Setup status was refreshed.');
+    }
+
+    function toggleSetupOption(key, checked) {
+      state.setupOptions[key] = !!checked;
+      renderSetup();
+    }
+
+    function setupProgressSteps() {
+      const options = state.setupOptions || {};
+      const steps = [];
+      if (options.deps) {
+        steps.push({ id: 'deps', label: options.frontend === false ? 'Composer dependencies' : 'Composer + npm dependencies' });
+      }
+      steps.push({ id: 'migrate', label: 'Platform + app migrations' });
+      if (options.seed !== false) {
+        steps.push({ id: 'seed', label: 'Platform + app seeders' });
+      }
+      if (options.patch !== false) {
+        steps.push({ id: 'patch', label: 'Platform + app patches' });
+      }
+      return steps;
+    }
+
+    function renderSetup() {
+      const payload = state.setup || { summary: {}, steps: [], message: '' };
+      const summary = payload.summary || {};
+      const badge = $('setupReadyBadge');
+      if (badge) {
+        badge.textContent = payload.ready_label || (payload.needs_attention ? 'Needs setup' : 'Ready');
+        badge.className = `rounded-xl px-3 py-1 text-sm font-bold ${payload.needs_attention ? 'bg-amber-400/20 text-amber-100' : 'bg-emerald-400/20 text-emerald-200'}`;
+      }
+
+      const options = state.setupOptions || {};
+      $('setupStepOptions').innerHTML = `
+        ${setupOptionCard('deps', 'Dependencies', 'Install Composer packages and theme npm packages', options.deps !== false)}
+        ${setupOptionCard('frontend', 'Frontend npm', 'Include npm installs (uncheck for Composer only)', options.frontend !== false, options.deps === false)}
+        ${setupOptionCard('migrate', 'Migrations', 'Always included: platform and app schema updates', true, true)}
+        ${setupOptionCard('seed', 'Seeders', 'Load starter / demo database rows', options.seed !== false)}
+        ${setupOptionCard('patch', 'Patches', 'Apply pending one-off data patches', options.patch !== false)}
+      `;
+
+      const progress = setupProgressSteps();
+      $('setupProgressLabel').textContent = state.setupRunning ? 'Running' : 'Ready to run';
+      $('setupProgressList').innerHTML = progress.map((step, index) => `
+        <div class="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[.04] px-4 py-3">
+          <span class="grid h-8 w-8 place-items-center rounded-xl border border-white/10 bg-black/20 text-xs font-black text-slate-300">${index + 1}</span>
+          <div class="min-w-0 flex-1">
+            <div class="font-bold text-slate-100">${esc(step.label)}</div>
+            <div class="text-xs text-slate-500">${state.setupRunning ? 'In progress…' : 'Queued for setup'}</div>
+          </div>
+        </div>
+      `).join('') || '<div class="rounded-2xl border border-dashed border-white/10 p-4 text-sm text-slate-500">Select at least migrations to continue.</div>';
+
+      $('setupStatusCards').innerHTML = `
+        ${smallCard('Migrations pending', String(summary.migrations_pending || 0), '', summary.migrations_pending > 0 ? 'warn' : 'success')}
+        ${smallCard('Patches pending', String(summary.patches_pending || 0), '', summary.patches_pending > 0 ? 'warn' : 'success')}
+        ${smallCard('Health score', String(summary.health_score || 0), '', summary.health_ok ? 'success' : 'warn')}
+        <div class="rounded-2xl border border-white/10 bg-black/20 p-4 text-sm text-slate-300">${esc(payload.message || 'Setup status is ready.')}</div>
+      `;
+    }
+
+    function setupOptionCard(key, title, copy, checked, locked = false) {
+      return `<label class="flex cursor-pointer items-start gap-3 rounded-2xl border border-white/10 bg-white/[.04] px-4 py-3 ${locked ? 'opacity-80' : 'hover:bg-white/[.06]'}">
+        <input type="checkbox" class="mt-1" ${checked ? 'checked' : ''} ${locked ? 'disabled' : ''} onchange="toggleSetupOption('${key}', this.checked)">
+        <span class="min-w-0"><span class="block font-bold text-white">${esc(title)}</span><span class="mt-1 block text-sm text-slate-400">${esc(copy)}</span></span>
+      </label>`;
+    }
+
+    async function runProjectSetup() {
+      if (!ensureReady()) return;
+      const options = state.setupOptions || {};
+      const ok = await askConfirm(
+        'Run project setup?',
+        'This can install dependencies and update the local database (migrate / seed / patch).',
+        'warn',
+      );
+      if (!ok) return;
+
+      state.setupRunning = true;
+      renderSetup();
+      await runInspectorAction('setup', {
+        skip_deps: options.deps === false,
+        skip_frontend: options.frontend === false,
+        skip_seed: options.seed === false,
+        skip_patch: options.patch === false,
+      });
+      state.setupRunning = false;
+      state.loaded.setup = false;
+      await loadSetup();
     }
 
     function migrationDetailRow(label, value) {
@@ -3987,7 +4092,7 @@
       if (!ensureReady()) return;
       const migrationActions = ['migrate', 'migrate_rollback', 'migrate_reset', 'migrate_drop', 'migrate_fresh', 'migrate_status'];
       const patchActions = ['patch_run', 'patch_rollback', 'patch_reset', 'patch_status'];
-      const targetView = action === 'doctor' ? 'health' : migrationActions.includes(action) ? 'migrations' : patchActions.includes(action) ? 'patches' : ['build', 'build_sign', 'release_patch'].includes(action) ? 'build' : ['pinker_status', 'pinker_rebuild', 'pinker_clear'].includes(action) ? 'pinker' : ['schedule_list', 'schedule_run'].includes(action) ? 'schedule' : 'dashboard';
+      const targetView = action === 'doctor' ? 'health' : action === 'setup' ? 'setup' : migrationActions.includes(action) ? 'migrations' : patchActions.includes(action) ? 'patches' : ['build', 'build_sign', 'release_patch'].includes(action) ? 'build' : ['pinker_status', 'pinker_rebuild', 'pinker_clear'].includes(action) ? 'pinker' : ['schedule_list', 'schedule_run'].includes(action) ? 'schedule' : 'dashboard';
       if (state.view !== targetView) switchView(targetView);
       closeDetailDrawer();
       const actionTitles = {
@@ -3999,6 +4104,7 @@
         patch_run: 'Running patches',
         patch_rollback: 'Rolling back patches',
         patch_reset: 'Resetting patches',
+        setup: 'Running project setup',
         doctor: 'Running doctor',
       };
       const actionMessages = {
@@ -4010,6 +4116,7 @@
         patch_run: 'Executing pending data patches.',
         patch_rollback: 'Rolling back the latest rollbackable patch(es).',
         patch_reset: 'Rolling back all rollbackable patches.',
+        setup: 'Installing dependencies and preparing migrations, seeders, and patches.',
         doctor: 'Checking project health and environment.',
       };
       const actionTitle = actionTitles[action] || 'Running Inspector action';
@@ -4057,6 +4164,7 @@
 
     function actionResultBox(action) {
       if (action === 'doctor') return $('healthActionResult');
+      if (action === 'setup') return $('setupActionResult');
       if (['migrate', 'migrate_rollback', 'migrate_reset', 'migrate_drop', 'migrate_fresh', 'migrate_status'].includes(action)) return $('migrationsActionResult');
       if (['patch_run', 'patch_rollback', 'patch_reset', 'patch_status'].includes(action)) return $('patchesActionResult');
       if (['build', 'build_sign', 'release_patch'].includes(action)) return $('buildActionResult');
@@ -4090,6 +4198,8 @@
           await loadTables();
         } else if (view === 'health') {
           await loadHealth();
+        } else if (view === 'setup') {
+          await loadSetup();
         } else if (view === 'migrations') {
           await loadMigrations();
         } else if (view === 'patches') {
@@ -4228,7 +4338,7 @@
     loadApps().then(() => boot()).then(() => {
       setReady(true);
       const initial = (location.hash || '#dashboard').slice(1);
-      switchView(['dashboard', 'connections', 'database', 'query', 'health', 'migrations', 'patches', 'routes', 'users', 'flow', 'schedule', 'logs', 'themes', 'pinker', 'build', 'views', 'lang', 'env', 'config', 'export'].includes(initial) ? initial : 'dashboard');
+      switchView(['dashboard', 'setup', 'connections', 'database', 'query', 'health', 'migrations', 'patches', 'routes', 'users', 'flow', 'schedule', 'logs', 'themes', 'pinker', 'build', 'views', 'lang', 'env', 'config', 'export'].includes(initial) ? initial : 'dashboard');
     }).catch(error => {
       showOperation('danger', 'Inspector could not load', error.message || 'The initial project scan failed.');
       const lock = $('bootLock');

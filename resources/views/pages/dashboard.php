@@ -18,6 +18,14 @@
           </section>
         </div>
         <div class="grid grid-cols-3 gap-4 max-xl:grid-cols-1">
+          <button onclick="switchView('setup')" class="group relative overflow-hidden rounded-2xl border border-emerald-300/25 bg-[#0a1720]/95 p-4 text-left shadow-[0_18px_60px_rgba(0,0,0,.22)] transition hover:-translate-y-0.5 hover:border-emerald-300/55 hover:bg-[#0d2130] focus:outline-none focus:ring-2 focus:ring-emerald-300/50">
+            <div class="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-emerald-300/70 to-transparent"></div>
+            <div class="flex items-center gap-4">
+              <span class="grid h-12 w-12 shrink-0 place-items-center rounded-2xl border border-emerald-300/20 bg-emerald-400/12 text-emerald-300"><svg viewBox="0 0 24 24" class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18"/><path d="M5 8h14"/><path d="M7 12h10"/><path d="M9 16h6"/></svg></span>
+              <span class="min-w-0 flex-1"><span class="block text-[11px] font-bold uppercase tracking-wide text-emerald-300/80">Bootstrap</span><span class="mt-1 block text-lg font-black text-white">Project Setup</span><span class="mt-1 block text-sm text-slate-400">Deps, migrations, seeders, and patches in one run.</span></span>
+              <span class="rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-bold text-emerald-200 transition group-hover:bg-emerald-300 group-hover:text-slate-950">Open</span>
+            </div>
+          </button>
           <button onclick="runInspectorAction('doctor')" class="group relative overflow-hidden rounded-2xl border border-emerald-300/25 bg-[#0a1720]/95 p-4 text-left shadow-[0_18px_60px_rgba(0,0,0,.22)] transition hover:-translate-y-0.5 hover:border-emerald-300/55 hover:bg-[#0d2130] focus:outline-none focus:ring-2 focus:ring-emerald-300/50">
             <div class="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-emerald-300/70 to-transparent"></div>
             <div class="flex items-center gap-4">
@@ -32,14 +40,6 @@
               <span class="grid h-12 w-12 shrink-0 place-items-center rounded-2xl border border-sky-300/20 bg-sky-400/12 text-sky-300"><svg viewBox="0 0 24 24" class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7c0 2 4 3 8 3s8-1 8-3-4-3-8-3-8 1-8 3Z"/><path d="M4 7v10c0 2 4 3 8 3s8-1 8-3V7"/><path d="M4 12c0 2 4 3 8 3s8-1 8-3"/></svg></span>
               <span class="min-w-0 flex-1"><span class="block text-[11px] font-bold uppercase tracking-wide text-sky-300/80">Schema workflow</span><span class="mt-1 block text-lg font-black text-white">Run Migrations</span><span class="mt-1 block text-sm text-slate-400">Build or refresh database structure.</span></span>
               <span class="rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-bold text-sky-200 transition group-hover:bg-sky-300 group-hover:text-slate-950">Run</span>
-            </div>
-          </button>
-          <button onclick="switchView('routes')" class="group relative overflow-hidden rounded-2xl border border-violet-300/25 bg-[#111226]/95 p-4 text-left shadow-[0_18px_60px_rgba(0,0,0,.22)] transition hover:-translate-y-0.5 hover:border-violet-300/55 hover:bg-[#171536] focus:outline-none focus:ring-2 focus:ring-violet-300/50">
-            <div class="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-violet-300/70 to-transparent"></div>
-            <div class="flex items-center gap-4">
-              <span class="grid h-12 w-12 shrink-0 place-items-center rounded-2xl border border-violet-300/20 bg-violet-400/12 text-violet-300"><svg viewBox="0 0 24 24" class="h-6 w-6" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 7h12"/><path d="M6 12h12"/><path d="M6 17h12"/><path d="M3 7h.01M3 12h.01M3 17h.01"/></svg></span>
-              <span class="min-w-0 flex-1"><span class="block text-[11px] font-bold uppercase tracking-wide text-violet-300/80">App map</span><span class="mt-1 block text-lg font-black text-white">Inspect Routes</span><span class="mt-1 block text-sm text-slate-400">Open route files, methods, and actions.</span></span>
-              <span class="rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-bold text-violet-200 transition group-hover:bg-violet-300 group-hover:text-slate-950">Open</span>
             </div>
           </button>
         </div>
