@@ -3623,66 +3623,148 @@ function run_cli_action(string $root, string $action, array $extraArgs = []): ar
     $package = inspector_app_package($root, $platformRoot) ?? inspector_active_package($platformRoot);
 
     $commands = [
-        'doctor' => ['doctor', '--json', '--no-ansi'],
-        'migrate_status' => ['migrate:status', '--no-ansi'],
-        'routes' => ['route:actions', '--no-ansi'],
-        'devdb_status' => ['devdb:status', '--json', '--no-ansi'],
-        'pinker_status' => ['pinker:status', '--no-ansi'],
-        'pinker_rebuild' => ['pinker:rebuild', '--no-ansi'],
-        'pinker_clear' => ['pinker:clear', '--no-ansi'],
-        'build' => ['build', '--yes', '--no-ansi'],
-        'build_sign' => ['build', '--yes', '--sign', '--no-ansi'],
-        'sign_keygen' => ['pinx:sign-keygen', '--no-ansi'],
-        'release_patch' => ['release', '--bump=patch', '--yes', '--no-ansi'],
-        'schedule_list' => ['schedule:list', '--no-ansi'],
-        'schedule_run' => ['schedule:run', '--no-ansi'],
-        'deps_status' => ['deps:status', '--no-ansi'],
-        'migrate' => ['migrate', '--platform', '--no-ansi'],
-        'migrate_rollback' => ['migrate:rollback', '--no-ansi'],
-        'migrate_reset' => ['migrate:reset', '--force', '--no-ansi'],
-        'migrate_drop' => ['migrate:drop', '--force', '--no-ansi'],
-        'migrate_fresh' => ['migrate:fresh', '--force', '--no-ansi'],
-        'patch_status' => ['patch:status', '--no-ansi'],
-        'patch_run' => ['patch:run', '--no-ansi'],
-        'patch_rollback' => ['patch:rollback', '--no-ansi'],
-        'patch_reset' => ['patch:reset', '--force', '--no-ansi'],
-        'setup' => ['setup', '--yes', '--no-ansi'],
-        'user_list' => ['user:list', '--json', '-n', '--no-ansi'],
-        'user_login' => ['user:login', '--json', '-n', '--no-ansi'],
-        'user_logout' => ['user:logout', '--json', '-n', '--no-ansi'],
+        'doctor' => ['doctor', '--json'],
+        'migrate_status' => ['migrate:status'],
+        'routes' => ['route:actions'],
+        'devdb_status' => ['devdb:status', '--json'],
+        'pinker_status' => ['pinker:status'],
+        'pinker_rebuild' => ['pinker:rebuild'],
+        'pinker_clear' => ['pinker:clear'],
+        'build' => ['build', '--yes'],
+        'build_sign' => ['build', '--yes', '--sign'],
+        'sign_keygen' => ['pinx:sign-keygen'],
+        'release_patch' => ['release', '--bump=patch', '--yes'],
+        'schedule_list' => ['schedule:list'],
+        'schedule_run' => ['schedule:run'],
+        'deps_status' => ['deps:status'],
+        'migrate' => ['migrate', '--platform'],
+        'migrate_rollback' => ['migrate:rollback'],
+        'migrate_reset' => ['migrate:reset', '--force'],
+        'migrate_drop' => ['migrate:drop', '--force'],
+        'migrate_fresh' => ['migrate:fresh', '--force'],
+        'patch_status' => ['patch:status'],
+        'patch_run' => ['patch:run'],
+        'patch_rollback' => ['patch:rollback'],
+        'patch_reset' => ['patch:reset', '--force'],
+        'setup' => ['setup', '--yes'],
+        'user_list' => ['user:list', '--json'],
+        'user_login' => ['user:login', '--json'],
+        'user_logout' => ['user:logout', '--json'],
     ];
 
     if (!isset($commands[$action])) {
         throw new RuntimeException('Unknown Inspector action.');
     }
 
+    $packageActions = [
+        'migrate', 'migrate_rollback', 'migrate_reset', 'migrate_drop', 'migrate_fresh', 'migrate_status',
+        'patch_status', 'patch_run', 'patch_rollback', 'patch_reset',
+    ];
+    if (in_array($action, $packageActions, true) && ($package === null || $package === '')) {
+        throw new RuntimeException('No active app package is selected for this Inspector action.');
+    }
+
     $resolved = inspector_resolve_cli($platformRoot, $package);
     $args = array_merge($commands[$action], $extraArgs);
+    // Always force non-interactive CLI — interactive prompts hang Inspector's proc_open pipes on Windows.
+    if (!in_array('-n', $args, true) && !in_array('--no-interaction', $args, true)) {
+        $args[] = '-n';
+    }
+    if (!in_array('--no-ansi', $args, true)) {
+        $args[] = '--no-ansi';
+    }
     $cmd = array_merge($resolved['cli'], $args);
 
     if ($package !== null && $package !== '' && $resolved['inject_package']) {
         array_splice($cmd, 3, 0, [$package]);
     }
 
+    return inspector_proc_run($cmd, $resolved['cwd'], $action);
+}
+
+/**
+ * Run a CLI process with non-blocking pipe reads and a hard timeout.
+ *
+ * @param list<string> $cmd
+ * @return array{action: string, exit_code: int, ok: bool, stdout: string, stderr: string, json: ?array}
+ */
+function inspector_proc_run(array $cmd, string $cwd, string $action, int $timeoutSeconds = 90): array
+{
     $descriptor = [
         0 => ['pipe', 'r'],
         1 => ['pipe', 'w'],
         2 => ['pipe', 'w'],
     ];
-    $process = proc_open($cmd, $descriptor, $pipes, $resolved['cwd']);
+    $process = proc_open($cmd, $descriptor, $pipes, $cwd);
     if (!is_resource($process)) {
         throw new RuntimeException('Unable to start Pinx command.');
     }
 
     fclose($pipes[0]);
-    $stdout = stream_get_contents($pipes[1]);
-    $stderr = stream_get_contents($pipes[2]);
-    fclose($pipes[1]);
-    fclose($pipes[2]);
+    stream_set_blocking($pipes[1], false);
+    stream_set_blocking($pipes[2], false);
+
+    $stdout = '';
+    $stderr = '';
+    $start = microtime(true);
+    $timedOut = false;
+
+    while (true) {
+        $status = proc_get_status($process);
+        $read = [];
+        if (is_resource($pipes[1])) {
+            $read[] = $pipes[1];
+        }
+        if (is_resource($pipes[2])) {
+            $read[] = $pipes[2];
+        }
+        if ($read !== []) {
+            $write = null;
+            $except = null;
+            stream_select($read, $write, $except, 0, 200000);
+            foreach ($read as $stream) {
+                $chunk = fread($stream, 8192);
+                if ($chunk === false || $chunk === '') {
+                    continue;
+                }
+                if ($stream === $pipes[1]) {
+                    $stdout .= $chunk;
+                } else {
+                    $stderr .= $chunk;
+                }
+            }
+        } else {
+            usleep(100000);
+        }
+
+        if (!$status['running']) {
+            break;
+        }
+
+        if ((microtime(true) - $start) >= $timeoutSeconds) {
+            $timedOut = true;
+            proc_terminate($process, 9);
+            break;
+        }
+    }
+
+    if (is_resource($pipes[1])) {
+        $stdout .= (string) stream_get_contents($pipes[1]);
+        fclose($pipes[1]);
+    }
+    if (is_resource($pipes[2])) {
+        $stderr .= (string) stream_get_contents($pipes[2]);
+        fclose($pipes[2]);
+    }
+
     $code = proc_close($process);
+    if ($timedOut) {
+        $code = 124;
+        $stderr = trim($stderr . "\nInspector stopped the command after {$timeoutSeconds}s to avoid hanging the UI.");
+    }
 
     $decoded = null;
-    $trimmed = trim((string) $stdout);
+    $trimmed = trim($stdout);
     if ($trimmed !== '' && ($trimmed[0] ?? '') === '{') {
         $json = json_decode($trimmed, true);
         $decoded = is_array($json) ? $json : null;
@@ -3692,8 +3774,8 @@ function run_cli_action(string $root, string $action, array $extraArgs = []): ar
         'action' => $action,
         'exit_code' => $code,
         'ok' => $code === 0,
-        'stdout' => (string) $stdout,
-        'stderr' => (string) $stderr,
+        'stdout' => $stdout,
+        'stderr' => $stderr,
         'json' => $decoded,
     ];
 }

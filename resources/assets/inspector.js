@@ -97,7 +97,12 @@
 
     function askConfirm(title, message, tone = 'danger') {
       return new Promise(resolve => {
+        closeDetailDrawer();
         const modal = $('confirmModal');
+        if (!modal) {
+          resolve(window.confirm((title || 'Confirm') + '\n\n' + (message || '')));
+          return;
+        }
         $('confirmTitle').textContent = title || 'Confirm action';
         $('confirmMessage').textContent = message || 'Are you sure?';
         $('confirmOk').className = `rounded-xl px-4 py-2 text-sm font-bold text-white ${tone === 'warn' ? 'bg-amber-500 hover:bg-amber-400' : 'bg-rose-500 hover:bg-rose-400'}`;
@@ -5118,6 +5123,10 @@
     });
     document.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') {
+        if ($('confirmModal') && !$('confirmModal').classList.contains('hidden')) {
+          $('confirmCancel')?.click();
+          return;
+        }
         if ($('schemaBuilderModal') && !$('schemaBuilderModal').classList.contains('hidden')) {
           closeSchemaBuilder();
           return;
