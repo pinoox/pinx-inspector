@@ -3182,10 +3182,22 @@ function safe_table_file(string $table): string
 
 function sqlite_pdo(string $root): PDO
 {
-    return new PDO('sqlite:' . sqlite_database($root), null, null, [
+    $database = sqlite_database($root);
+    $key = 'sqlite:' . strtolower(str_replace('\\', '/', $database));
+    $cache =& inspector_pdo_cache();
+    if (isset($cache[$key]) && $cache[$key] instanceof PDO) {
+        return $cache[$key];
+    }
+
+    $pdo = new PDO('sqlite:' . $database, null, null, [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
     ]);
+    inspector_configure_sqlite_pdo($pdo);
+    $cache[$key] = $pdo;
+    inspector_track_pdo($pdo);
+
+    return $pdo;
 }
 
 function pdo_for_connection(string $root, string $driver): PDO
@@ -3194,10 +3206,20 @@ function pdo_for_connection(string $root, string $driver): PDO
 
     if ($driver === 'sqlite') {
         $database = inspector_resolve_shared_path($root, (string) ($env['DB_DATABASE'] ?? ''));
-        return new PDO('sqlite:' . $database, null, null, [
+        $key = 'sqlite:' . strtolower(str_replace('\\', '/', $database));
+        $cache =& inspector_pdo_cache();
+        if (isset($cache[$key]) && $cache[$key] instanceof PDO) {
+            return $cache[$key];
+        }
+        $pdo = new PDO('sqlite:' . $database, null, null, [
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
         ]);
+        inspector_configure_sqlite_pdo($pdo);
+        $cache[$key] = $pdo;
+        inspector_track_pdo($pdo);
+
+        return $pdo;
     }
 
     $host = (string) ($env['DB_HOST'] ?? '127.0.0.1');
@@ -3209,10 +3231,60 @@ function pdo_for_connection(string $root, string $driver): PDO
         ? "pgsql:host={$host};port={$port};dbname={$database}"
         : "mysql:host={$host};port={$port};dbname={$database};charset=utf8mb4";
 
-    return new PDO($dsn, $username, $password, [
+    $pdo = new PDO($dsn, $username, $password, [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
     ]);
+    inspector_track_pdo($pdo);
+
+    return $pdo;
+}
+
+/**
+ * Cached SQLite PDOs keyed by database path (cleared before migrate CLI).
+ *
+ * @param array<string, PDO|null>|null $replace
+ * @return array<string, PDO|null>
+ */
+function &inspector_pdo_cache(?array $replace = null): array
+{
+    static $cache = [];
+    if ($replace !== null) {
+        $cache = $replace;
+    }
+
+    return $cache;
+}
+
+/**
+ * @param array<int, PDO|null>|null $replace
+ * @return array<int, PDO|null>
+ */
+function &inspector_pdo_registry(?array $replace = null): array
+{
+    static $registry = [];
+    if ($replace !== null) {
+        $registry = $replace;
+    }
+
+    return $registry;
+}
+
+function inspector_track_pdo(PDO $pdo): void
+{
+    $registry =& inspector_pdo_registry();
+    $registry[] = $pdo;
+}
+
+function inspector_configure_sqlite_pdo(PDO $pdo): void
+{
+    try {
+        $pdo->exec('PRAGMA busy_timeout = 10000');
+        $pdo->exec('PRAGMA journal_mode = WAL');
+        $pdo->exec('PRAGMA synchronous = NORMAL');
+    } catch (Throwable) {
+        // Best-effort; older SQLite builds may reject some pragmas.
+    }
 }
 
 function pdo_tables_payload(string $root, string $driver): array
@@ -3679,7 +3751,91 @@ function run_cli_action(string $root, string $action, array $extraArgs = []): ar
         array_splice($cmd, 3, 0, [$package]);
     }
 
-    return inspector_proc_run($cmd, $resolved['cwd'], $action);
+    if (str_starts_with($action, 'migrate_') || $action === 'migrate' || str_starts_with($action, 'patch_')) {
+        inspector_clear_stale_migration_lock(is_string($package) ? $package : null);
+        inspector_release_database_connections();
+    }
+
+    @set_time_limit(120);
+    @ini_set('max_execution_time', '120');
+
+    return inspector_proc_run($cmd, $resolved['cwd'], $action, 45);
+}
+
+/**
+ * Drop open DB handles before spawning migrate/patch CLI (DevDB/SQLite file locks).
+ */
+function inspector_release_database_connections(): void
+{
+    // Drop Inspector raw PDOs (and path cache) so Windows releases the SQLite file lock.
+    $cache =& inspector_pdo_cache();
+    foreach ($cache as $key => $pdo) {
+        $cache[$key] = null;
+    }
+    inspector_pdo_cache([]);
+
+    $registry =& inspector_pdo_registry();
+    foreach ($registry as $i => $pdo) {
+        $registry[$i] = null;
+    }
+    inspector_pdo_registry([]);
+
+    if (class_exists(\Pinoox\Portal\Database\DB::class)) {
+        try {
+            $manager = \Pinoox\Portal\Database\DB::___();
+            if (is_object($manager)) {
+                $names = ['default', 'platform'];
+                if (method_exists($manager, 'getConnections')) {
+                    $names = array_values(array_unique(array_merge(
+                        $names,
+                        array_map('strval', array_keys((array) $manager->getConnections())),
+                    )));
+                }
+                foreach ($names as $name) {
+                    try {
+                        if (method_exists($manager, 'purge')) {
+                            $manager->purge($name);
+                        } elseif (method_exists($manager, 'disconnect')) {
+                            $manager->disconnect($name);
+                        }
+                    } catch (Throwable) {
+                        // Continue closing remaining connections.
+                    }
+                }
+            }
+        } catch (Throwable) {
+            // Best-effort; CLI may still run.
+        }
+    }
+
+    gc_collect_cycles();
+}
+
+function inspector_clear_stale_migration_lock(?string $package): void
+{
+    if ($package === null || $package === '') {
+        return;
+    }
+
+    $lockFile = sys_get_temp_dir() . '/migration_lock_' . $package . '.lock';
+    if (!is_file($lockFile)) {
+        return;
+    }
+
+    $raw = trim((string) @file_get_contents($lockFile));
+    $ownerPid = ctype_digit($raw) ? (int) $raw : 0;
+    $age = time() - (int) @filemtime($lockFile);
+    $dead = $ownerPid <= 0;
+    if (!$dead && function_exists('posix_kill')) {
+        $dead = !@posix_kill($ownerPid, 0);
+    } elseif (!$dead && PHP_OS_FAMILY === 'Windows') {
+        $output = @shell_exec('tasklist /FI "PID eq ' . $ownerPid . '" /NH 2>NUL');
+        $dead = !is_string($output) || !str_contains($output, (string) $ownerPid);
+    }
+
+    if ($age > 15 || $dead) {
+        @unlink($lockFile);
+    }
 }
 
 /**
@@ -3688,7 +3844,7 @@ function run_cli_action(string $root, string $action, array $extraArgs = []): ar
  * @param list<string> $cmd
  * @return array{action: string, exit_code: int, ok: bool, stdout: string, stderr: string, json: ?array}
  */
-function inspector_proc_run(array $cmd, string $cwd, string $action, int $timeoutSeconds = 90): array
+function inspector_proc_run(array $cmd, string $cwd, string $action, int $timeoutSeconds = 45): array
 {
     $descriptor = [
         0 => ['pipe', 'r'],
