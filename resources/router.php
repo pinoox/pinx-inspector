@@ -3720,7 +3720,7 @@ function cli_actions(): array
         ['id' => 'schedule_list', 'label' => 'Schedule List', 'description' => 'List scheduled tasks', 'command' => 'schedule:list'],
         ['id' => 'schedule_run', 'label' => 'Run Schedule', 'description' => 'Run due scheduled tasks', 'command' => 'schedule:run'],
         ['id' => 'deps_status', 'label' => 'Dependencies', 'description' => 'Check dependency status', 'command' => 'deps:status'],
-        ['id' => 'migrate', 'label' => 'Run Migrate', 'description' => 'Run app and platform migrations', 'command' => 'migrate --platform'],
+        ['id' => 'migrate', 'label' => 'Run Migrate', 'description' => 'Run app and platform migrations', 'command' => 'migrate platform && migrate {app}'],
         ['id' => 'migrate_rollback', 'label' => 'Rollback Migrations', 'description' => 'Rollback the last app migration batch', 'command' => 'migrate:rollback'],
         ['id' => 'migrate_reset', 'label' => 'Reset Migrations', 'description' => 'Rollback all migration batches via down()', 'command' => 'migrate:reset --force'],
         ['id' => 'migrate_drop', 'label' => 'Drop Migration Tables', 'description' => 'Drop package tables and clear migration history', 'command' => 'migrate:drop --force'],
@@ -3730,6 +3730,63 @@ function cli_actions(): array
         ['id' => 'patch_rollback', 'label' => 'Rollback Patches', 'description' => 'Rollback the latest rollbackable patch', 'command' => 'patch:rollback'],
         ['id' => 'patch_reset', 'label' => 'Reset Patches', 'description' => 'Rollback all rollbackable patches', 'command' => 'patch:reset --force'],
         ['id' => 'setup', 'label' => 'Project Setup', 'description' => 'Install deps, migrate, seed, and patch', 'command' => 'setup --yes'],
+    ];
+}
+
+/**
+ * @param list<string> $args
+ * @return list<string>
+ */
+function inspector_cli_non_interactive_args(array $args): array
+{
+    if (!in_array('-n', $args, true) && !in_array('--no-interaction', $args, true)) {
+        $args[] = '-n';
+    }
+    if (!in_array('--no-ansi', $args, true)) {
+        $args[] = '--no-ansi';
+    }
+
+    return $args;
+}
+
+/**
+ * Platform pinoox CLI uses "migrate platform" then "migrate {package}" — not pinx's --platform flag.
+ *
+ * @param list<string> $extraArgs
+ * @return array{action: string, exit_code: int, ok: bool, stdout: string, stderr: string, json: ?array}
+ */
+function run_pinoox_migrate_action(array $resolved, ?string $package, array $extraArgs = []): array
+{
+    $args = inspector_cli_non_interactive_args($extraArgs);
+
+    inspector_clear_stale_migration_lock(is_string($package) ? $package : null);
+    inspector_release_database_connections();
+
+    @set_time_limit(120);
+    @ini_set('max_execution_time', '120');
+
+    $platformCmd = array_merge($resolved['cli'], ['migrate', 'platform'], $args);
+    $platformResult = inspector_proc_run($platformCmd, $resolved['cwd'], 'migrate', 45);
+    if (!$platformResult['ok']) {
+        return $platformResult;
+    }
+
+    if ($package === null || $package === '') {
+        return $platformResult;
+    }
+
+    inspector_release_database_connections();
+
+    $appCmd = array_merge($resolved['cli'], ['migrate', $package], $args);
+    $appResult = inspector_proc_run($appCmd, $resolved['cwd'], 'migrate', 45);
+
+    return [
+        'action' => 'migrate',
+        'exit_code' => $appResult['exit_code'],
+        'ok' => $appResult['ok'],
+        'stdout' => trim($platformResult['stdout'] . "\n" . $appResult['stdout']),
+        'stderr' => trim($platformResult['stderr'] . "\n" . $appResult['stderr']),
+        'json' => $appResult['json'] ?? $platformResult['json'],
     ];
 }
 
@@ -3785,14 +3842,12 @@ function run_cli_action(string $root, string $action, array $extraArgs = []): ar
     }
 
     $resolved = inspector_resolve_cli($platformRoot, $package);
-    $args = array_merge($commands[$action], $extraArgs);
-    // Always force non-interactive CLI — interactive prompts hang Inspector's proc_open pipes on Windows.
-    if (!in_array('-n', $args, true) && !in_array('--no-interaction', $args, true)) {
-        $args[] = '-n';
+
+    if ($action === 'migrate' && $resolved['inject_package']) {
+        return run_pinoox_migrate_action($resolved, $package, $extraArgs);
     }
-    if (!in_array('--no-ansi', $args, true)) {
-        $args[] = '--no-ansi';
-    }
+
+    $args = inspector_cli_non_interactive_args(array_merge($commands[$action], $extraArgs));
     $cmd = array_merge($resolved['cli'], $args);
 
     if ($package !== null && $package !== '' && $resolved['inject_package']) {
