@@ -86,6 +86,7 @@
         if (button.closest('#jsonModal')) return;
         if (button.closest('#detailDrawer')) return;
         if (button.closest('#confirmModal')) return;
+        if (button.closest('#userFormModal')) return;
         if (button.closest('#schemaBuilderModal')) return;
         if (button.closest('#langToolsModal')) return;
         button.disabled = busy;
@@ -3069,7 +3070,7 @@
         ${smallCard('Other', payload.summary?.inactive || 0, 'inactive / pending / suspend', 'warn')}
       `;
       $('usersContent').innerHTML = users.length ? `
-        <table class="w-full min-w-[980px] text-left text-sm">
+        <table class="w-full min-w-[1100px] text-left text-sm">
           <thead class="bg-white/[.04] text-xs uppercase tracking-wide text-slate-400"><tr><th class="px-4 py-4 font-semibold">User</th><th class="px-4 py-4 font-semibold">Email</th><th class="px-4 py-4 font-semibold">Status</th><th class="px-4 py-4 font-semibold">Group</th><th class="px-4 py-4 font-semibold">App</th><th class="px-4 py-4 font-semibold">Created</th><th class="px-4 py-4 font-semibold">Actions</th></tr></thead>
           <tbody class="divide-y divide-white/10">${users.map((user, index) => `<tr onclick="selectUser(${index})" class="cursor-pointer transition hover:bg-white/[.05] ${index === state.selectedUser ? 'bg-sky-500/16' : ''}">
             <td class="px-4 py-4"><div class="min-w-0"><div class="font-bold text-white">#${esc(user.user_id)} ${esc(user.username || '')}</div><div class="mt-1 truncate text-xs text-slate-400">${esc(user.full_name || '—')}</div></div></td>
@@ -3078,11 +3079,16 @@
             <td class="px-4 py-4 text-slate-300">${esc(user.group_key || '—')}</td>
             <td class="px-4 py-4 text-slate-300">${esc(user.app || '—')}</td>
             <td class="px-4 py-4 text-slate-300">${esc(user.created_at || '—')}</td>
-            <td class="px-4 py-4"><button onclick="event.stopPropagation(); loginUser(${Number(user.user_id) || 0})" class="rounded-xl border border-emerald-300/20 bg-emerald-400/10 px-3 py-1.5 text-xs font-bold text-emerald-200 hover:bg-emerald-400/15" ${String(user.status || '').toLowerCase() === 'active' ? '' : 'disabled'}>Login</button></td>
+            <td class="px-4 py-4"><div class="flex flex-wrap gap-1.5" onclick="event.stopPropagation()">
+              <button type="button" onclick="loginUser(${Number(user.user_id) || 0})" class="rounded-xl border border-emerald-300/20 bg-emerald-400/10 px-2.5 py-1.5 text-xs font-bold text-emerald-200 hover:bg-emerald-400/15" ${String(user.status || '').toLowerCase() === 'active' ? '' : 'disabled'}>Login</button>
+              <button type="button" onclick="openUserForm('edit', ${Number(user.user_id) || 0})" class="rounded-xl border border-white/10 bg-white/5 px-2.5 py-1.5 text-xs font-bold text-slate-200 hover:bg-white/10">Edit</button>
+              <button type="button" onclick="openUserForm('password', ${Number(user.user_id) || 0})" class="rounded-xl border border-amber-300/20 bg-amber-400/10 px-2.5 py-1.5 text-xs font-bold text-amber-100 hover:bg-amber-400/15">Password</button>
+              <button type="button" onclick="deleteUser(${Number(user.user_id) || 0})" class="rounded-xl border border-rose-300/20 bg-rose-400/10 px-2.5 py-1.5 text-xs font-bold text-rose-100 hover:bg-rose-400/15">Delete</button>
+            </div></td>
           </tr>`).join('')}</tbody>
         </table>
         <div class="border-t border-white/10 px-4 py-4 text-sm text-slate-400">Showing ${users.length.toLocaleString()} of ${(payload.summary?.total || users.length).toLocaleString()} users</div>
-      ` : '<div class="grid min-h-[420px] place-items-center p-8 text-center text-slate-500"><div><div class="text-lg font-bold text-slate-300">No users found</div><div class="mt-2 text-sm">Try another search term or create a user with pinx user:create.</div></div></div>';
+      ` : '<div class="grid min-h-[420px] place-items-center p-8 text-center text-slate-500"><div><div class="text-lg font-bold text-slate-300">No users found</div><div class="mt-2 text-sm">Create a user with New User, or try another search term.</div><button type="button" onclick="openUserForm(\'create\')" class="mt-4 rounded-xl bg-sky-500 px-4 py-2 text-sm font-bold text-white hover:bg-sky-400">New User</button></div></div>';
       renderUserDetails(users[state.selectedUser] || null);
     }
 
@@ -3094,21 +3100,256 @@
 
     function renderUserDetails(user) {
       if (!user) {
-        $('userDetails').innerHTML = '<div class="rounded-3xl border border-dashed border-white/10 p-6 text-center text-slate-500">Select a user to inspect details or login.</div>';
+        $('userDetails').innerHTML = '<div class="rounded-3xl border border-dashed border-white/10 p-6 text-center text-slate-500">Select a user to inspect details, edit, or login.</div>';
         return;
       }
       const canLogin = String(user.status || '').toLowerCase() === 'active';
       const login = state.lastLogin && Number(state.lastLogin.user_id) === Number(user.user_id) ? state.lastLogin : null;
+      const userId = Number(user.user_id) || 0;
       $('userDetails').innerHTML = `
         <div class="rounded-3xl border border-white/10 bg-[#091320]/90 p-4 shadow-[0_18px_70px_rgba(0,0,0,.22)]">
           <div class="mb-4 flex items-start justify-between gap-3"><div><h3 class="font-bold text-white">User Details</h3><div class="mt-1 text-sm text-slate-400">#${esc(user.user_id)} · ${esc(user.username || '')}</div></div><button onclick="renderUserDetails(null)" class="rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-sm font-bold text-slate-300 hover:bg-white/10">Close</button></div>
           <div class="overflow-hidden rounded-2xl border border-white/10 bg-black/20">
             ${configDetailRow('Username', user.username)}${configDetailRow('Email', user.email || '—')}${configDetailRow('Name', user.full_name || '—')}${configDetailRow('Status', user.status)}${configDetailRow('Group', user.group_key || '—')}${configDetailRow('App scope', user.app || '—')}${configDetailRow('Mobile', user.mobile || '—')}${configDetailRow('Created', user.created_at || '—')}
           </div>
-          <button onclick="loginUser(${Number(user.user_id) || 0})" class="mt-4 w-full rounded-xl border border-emerald-300/20 bg-emerald-400/10 px-4 py-3 text-sm font-bold text-emerald-200 hover:bg-emerald-400/15" ${canLogin ? '' : 'disabled'}>${canLogin ? 'Login as this user' : 'Login unavailable'}</button>
+          <div class="mt-4 grid gap-2">
+            <button onclick="loginUser(${userId})" class="w-full rounded-xl border border-emerald-300/20 bg-emerald-400/10 px-4 py-3 text-sm font-bold text-emerald-200 hover:bg-emerald-400/15" ${canLogin ? '' : 'disabled'}>${canLogin ? 'Login as this user' : 'Login unavailable'}</button>
+            <div class="grid grid-cols-3 gap-2">
+              <button type="button" onclick="openUserForm('edit', ${userId})" class="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-bold text-slate-200 hover:bg-white/10">Edit</button>
+              <button type="button" onclick="openUserForm('password', ${userId})" class="rounded-xl border border-amber-300/20 bg-amber-400/10 px-3 py-2 text-xs font-bold text-amber-100 hover:bg-amber-400/15">Password</button>
+              <button type="button" onclick="deleteUser(${userId})" class="rounded-xl border border-rose-300/20 bg-rose-400/10 px-3 py-2 text-xs font-bold text-rose-100 hover:bg-rose-400/15">Delete</button>
+            </div>
+          </div>
         </div>
         ${login ? renderLoginTokenCard(login) : `<div class="rounded-3xl border border-white/10 bg-[#091320]/90 p-4 shadow-[0_18px_70px_rgba(0,0,0,.22)]"><h3 class="font-bold text-white">CLI login</h3><p class="mt-4 text-sm leading-relaxed text-slate-400">Uses <code class="text-sky-200">user:login --id=${esc(user.user_id)}</code> and applies the token to browser localStorage/cookie for this app (no .env change).</p></div>`}
       `;
+    }
+
+    function findUserById(userId) {
+      const id = Number(userId) || 0;
+      return (state.users?.items || []).find(user => Number(user.user_id) === id) || null;
+    }
+
+    function userFormField(name, label, value = '', type = 'text', attrs = '') {
+      return `<label class="block"><span class="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-400">${esc(label)}</span><input id="userField_${name}" name="${esc(name)}" type="${esc(type)}" value="${esc(value)}" ${attrs} class="h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-sm text-slate-100 outline-none focus:border-sky-300"></label>`;
+    }
+
+    function openUserForm(mode = 'create', userId = 0) {
+      if (!ensureReady()) return;
+      const modal = $('userFormModal');
+      if (!modal) return;
+
+      const user = mode === 'create' ? null : findUserById(userId);
+      if ((mode === 'edit' || mode === 'password') && !user) {
+        showOperation('danger', 'User not found', 'Refresh the users list and try again.');
+        return;
+      }
+
+      $('userFormMode').value = mode;
+      $('userFormId').value = user ? String(user.user_id) : '';
+      $('userFormError').classList.add('hidden');
+      $('userFormError').textContent = '';
+
+      const statusOptions = ['active', 'inactive', 'suspend', 'pending']
+        .map(status => `<option value="${status}" ${String(user?.status || 'active').toLowerCase() === status ? 'selected' : ''}>${status}</option>`)
+        .join('');
+
+      if (mode === 'password') {
+        $('userFormEyebrow').textContent = 'Users / Password';
+        $('userFormTitle').textContent = `Reset password · #${user.user_id}`;
+        $('userFormCopy').textContent = `Set a new password for ${user.username || 'this user'} (admin reset, no old password required).`;
+        $('userFormSubmit').textContent = 'Update password';
+        $('userFormFields').innerHTML = `
+          ${userFormField('password', 'New password', '', 'password', 'required minlength="5" autocomplete="new-password"')}
+          ${userFormField('password_confirm', 'Confirm password', '', 'password', 'required minlength="5" autocomplete="new-password"')}
+          <label class="flex items-center gap-2 text-sm text-slate-300"><input id="userField_revoke_sessions" type="checkbox" class="h-4 w-4 rounded border-slate-600 bg-black/30 text-sky-500"> Revoke active sessions after reset</label>
+        `;
+      } else if (mode === 'edit') {
+        $('userFormEyebrow').textContent = 'Users / Edit';
+        $('userFormTitle').textContent = `Edit user · #${user.user_id}`;
+        $('userFormCopy').textContent = 'Update profile fields for the selected user.';
+        $('userFormSubmit').textContent = 'Save changes';
+        $('userFormFields').innerHTML = `
+          <div class="grid grid-cols-2 gap-3 max-sm:grid-cols-1">
+            ${userFormField('username', 'Username', user.username || '', 'text', 'required minlength="3"')}
+            ${userFormField('email', 'Email', user.email || '', 'email')}
+          </div>
+          <div class="grid grid-cols-2 gap-3 max-sm:grid-cols-1">
+            ${userFormField('fname', 'First name', user.fname || '', 'text')}
+            ${userFormField('lname', 'Last name', user.lname || '', 'text')}
+          </div>
+          <div class="grid grid-cols-2 gap-3 max-sm:grid-cols-1">
+            ${userFormField('mobile', 'Mobile', user.mobile || '', 'text')}
+            ${userFormField('group_key', 'Group key', user.group_key || '', 'text')}
+          </div>
+          <label class="block"><span class="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-400">Status</span><select id="userField_status" name="status" class="h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-sm text-slate-100 outline-none focus:border-sky-300">${statusOptions}</select></label>
+        `;
+      } else {
+        $('userFormEyebrow').textContent = 'Users / Create';
+        $('userFormTitle').textContent = 'New user';
+        $('userFormCopy').textContent = 'Create a user in the active app transport scope. Password is hashed automatically.';
+        $('userFormSubmit').textContent = 'Create user';
+        $('userFormFields').innerHTML = `
+          <div class="grid grid-cols-2 gap-3 max-sm:grid-cols-1">
+            ${userFormField('username', 'Username', '', 'text', 'required minlength="3" autocomplete="username"')}
+            ${userFormField('password', 'Password', '', 'password', 'required minlength="5" autocomplete="new-password"')}
+          </div>
+          <div class="grid grid-cols-2 gap-3 max-sm:grid-cols-1">
+            ${userFormField('email', 'Email', '', 'email')}
+            ${userFormField('mobile', 'Mobile', '', 'text')}
+          </div>
+          <div class="grid grid-cols-2 gap-3 max-sm:grid-cols-1">
+            ${userFormField('fname', 'First name', '', 'text')}
+            ${userFormField('lname', 'Last name', '', 'text')}
+          </div>
+          <div class="grid grid-cols-2 gap-3 max-sm:grid-cols-1">
+            ${userFormField('group_key', 'Group key', '', 'text')}
+            <label class="block"><span class="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-400">Status</span><select id="userField_status" name="status" class="h-10 w-full rounded-xl border border-white/10 bg-black/30 px-3 text-sm text-slate-100 outline-none focus:border-sky-300">${statusOptions}</select></label>
+          </div>
+        `;
+      }
+
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+      const first = $('userFormFields')?.querySelector('input, select');
+      if (first) setTimeout(() => first.focus(), 40);
+    }
+
+    function closeUserForm() {
+      const modal = $('userFormModal');
+      if (!modal) return;
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+    }
+
+    function readUserFormValue(name) {
+      const el = $('userField_' + name);
+      if (!el) return '';
+      if (el.type === 'checkbox') return el.checked;
+      return String(el.value || '').trim();
+    }
+
+    function showUserFormError(message) {
+      const box = $('userFormError');
+      if (!box) return;
+      box.textContent = message || 'Something went wrong.';
+      box.classList.remove('hidden');
+    }
+
+    async function submitUserForm() {
+      if (!ensureReady()) return;
+      const mode = $('userFormMode')?.value || 'create';
+      const userId = Number($('userFormId')?.value || 0);
+      $('userFormError')?.classList.add('hidden');
+
+      try {
+        if (mode === 'password') {
+          const password = String($('userField_password')?.value || '');
+          const confirm = String($('userField_password_confirm')?.value || '');
+          if (password.length < 5) {
+            showUserFormError('Password must be at least 5 characters.');
+            return;
+          }
+          if (password !== confirm) {
+            showUserFormError('Password confirmation does not match.');
+            return;
+          }
+          await runWithLoading('Updating password', `Resetting password for user #${userId}.`, async () => {
+            const payload = await post('/api/users/password', {
+              id: userId,
+              password,
+              revoke_sessions: !!readUserFormValue('revoke_sessions'),
+            });
+            if (!payload.ok) throw new Error(payload.message || 'Password update failed.');
+            closeUserForm();
+            await loadUsers();
+          }, 'Password updated.');
+          return;
+        }
+
+        if (mode === 'edit') {
+          const username = readUserFormValue('username');
+          if (username.length < 3) {
+            showUserFormError('Username must be at least 3 characters.');
+            return;
+          }
+          await runWithLoading('Saving user', `Updating user #${userId}.`, async () => {
+            const payload = await post('/api/users/update', {
+              id: userId,
+              username,
+              email: readUserFormValue('email'),
+              fname: readUserFormValue('fname'),
+              lname: readUserFormValue('lname'),
+              mobile: readUserFormValue('mobile'),
+              group_key: readUserFormValue('group_key'),
+              status: readUserFormValue('status') || 'active',
+            });
+            if (!payload.ok) throw new Error(payload.message || 'User update failed.');
+            closeUserForm();
+            await loadUsers();
+          }, 'User updated.');
+          return;
+        }
+
+        const username = readUserFormValue('username');
+        const password = String($('userField_password')?.value || '');
+        if (username.length < 3) {
+          showUserFormError('Username must be at least 3 characters.');
+          return;
+        }
+        if (password.length < 5) {
+          showUserFormError('Password must be at least 5 characters.');
+          return;
+        }
+        await runWithLoading('Creating user', `Creating ${username}.`, async () => {
+          const payload = await post('/api/users/create', {
+            username,
+            password,
+            email: readUserFormValue('email'),
+            fname: readUserFormValue('fname'),
+            lname: readUserFormValue('lname'),
+            mobile: readUserFormValue('mobile'),
+            group_key: readUserFormValue('group_key'),
+            status: readUserFormValue('status') || 'active',
+          });
+          if (!payload.ok) throw new Error(payload.message || 'User create failed.');
+          closeUserForm();
+          await loadUsers();
+          const createdId = Number(payload.user?.user_id || 0);
+          if (createdId > 0) {
+            const index = filteredUsers().findIndex(user => Number(user.user_id) === createdId);
+            if (index >= 0) state.selectedUser = index;
+            renderUsers();
+          }
+        }, 'User created.');
+      } catch (error) {
+        showUserFormError(error.message || 'Request failed.');
+        showOperation('danger', 'User action failed', error.message || 'Request failed.');
+      }
+    }
+
+    async function deleteUser(userId) {
+      if (!ensureReady()) return;
+      const id = Number(userId) || 0;
+      const user = findUserById(id);
+      if (id <= 0 || !user) {
+        showOperation('danger', 'Delete failed', 'A valid user is required.');
+        return;
+      }
+      const ok = await askConfirm(
+        'Delete user?',
+        `Delete #${id} (${user.username || 'user'})? This cannot be undone from Inspector.`,
+        'danger',
+      );
+      if (!ok) return;
+
+      await runWithLoading('Deleting user', `Removing user #${id}.`, async () => {
+        const payload = await post('/api/users/delete', { id, revoke_sessions: true });
+        if (!payload.ok) throw new Error(payload.message || 'User delete failed.');
+        if (state.lastLogin && Number(state.lastLogin.user_id) === id) state.lastLogin = null;
+        state.selectedUser = 0;
+        await loadUsers();
+      }, 'User deleted.');
     }
 
     function loginBrowserSnippet(login) {

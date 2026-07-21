@@ -371,6 +371,50 @@ try {
         return;
     }
 
+    if ($path === '/api/users/create') {
+        if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
+            json_response(['error' => true, 'message' => 'POST is required.'], 405);
+            return;
+        }
+
+        $payload = json_decode((string) file_get_contents('php://input'), true);
+        json_response(users_create_payload($root, is_array($payload) ? $payload : []));
+        return;
+    }
+
+    if ($path === '/api/users/update') {
+        if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
+            json_response(['error' => true, 'message' => 'POST is required.'], 405);
+            return;
+        }
+
+        $payload = json_decode((string) file_get_contents('php://input'), true);
+        json_response(users_update_payload($root, is_array($payload) ? $payload : []));
+        return;
+    }
+
+    if ($path === '/api/users/delete') {
+        if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
+            json_response(['error' => true, 'message' => 'POST is required.'], 405);
+            return;
+        }
+
+        $payload = json_decode((string) file_get_contents('php://input'), true);
+        json_response(users_delete_payload($root, is_array($payload) ? $payload : []));
+        return;
+    }
+
+    if ($path === '/api/users/password') {
+        if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
+            json_response(['error' => true, 'message' => 'POST is required.'], 405);
+            return;
+        }
+
+        $payload = json_decode((string) file_get_contents('php://input'), true);
+        json_response(users_password_payload($root, is_array($payload) ? $payload : []));
+        return;
+    }
+
     if ($path === '/api/views') {
         json_response(views_payload($root));
         return;
@@ -3722,6 +3766,10 @@ function run_cli_action(string $root, string $action, array $extraArgs = []): ar
         'user_list' => ['user:list', '--json'],
         'user_login' => ['user:login', '--json'],
         'user_logout' => ['user:logout', '--json'],
+        'user_create' => ['user:create', '--json'],
+        'user_update' => ['user:update', '--json'],
+        'user_delete' => ['user:delete', '--json'],
+        'user_password' => ['user:password', '--json'],
     ];
 
     if (!isset($commands[$action])) {
@@ -5419,6 +5467,198 @@ function users_logout_payload(string $root, array $input): array
             'exit_code' => (int) ($result['exit_code'] ?? 0),
         ],
     ];
+}
+
+/**
+ * @param array<string, mixed> $input
+ * @return array<string, mixed>
+ */
+function users_create_payload(string $root, array $input): array
+{
+    $username = trim((string) ($input['username'] ?? ''));
+    $password = (string) ($input['password'] ?? '');
+
+    if (strlen($username) < 3) {
+        throw new RuntimeException('Username must be at least 3 characters.');
+    }
+    if (strlen($password) < 5) {
+        throw new RuntimeException('Password must be at least 5 characters.');
+    }
+
+    $args = [
+        '--username=' . $username,
+        '--password=' . $password,
+    ];
+
+    foreach (['email', 'fname', 'lname', 'mobile'] as $field) {
+        $value = trim((string) ($input[$field] ?? ''));
+        if ($value !== '') {
+            $args[] = '--' . $field . '=' . $value;
+        }
+    }
+
+    $groupKey = trim((string) ($input['group_key'] ?? $input['group-key'] ?? ''));
+    if ($groupKey !== '') {
+        $args[] = '--group-key=' . $groupKey;
+    }
+
+    $status = trim((string) ($input['status'] ?? 'active'));
+    if ($status === '') {
+        $status = 'active';
+    }
+    $args[] = '--status=' . $status;
+
+    $role = trim((string) ($input['role'] ?? ''));
+    if ($role !== '') {
+        $args[] = '--role=' . $role;
+    }
+
+    return users_mutation_payload($root, 'user_create', $args, 'User create failed.');
+}
+
+/**
+ * @param array<string, mixed> $input
+ * @return array<string, mixed>
+ */
+function users_update_payload(string $root, array $input): array
+{
+    $userId = (int) ($input['id'] ?? 0);
+    if ($userId <= 0) {
+        throw new RuntimeException('A positive user id is required.');
+    }
+
+    $args = [(string) $userId];
+    $hasField = false;
+
+    foreach (['username', 'email', 'fname', 'lname', 'mobile'] as $field) {
+        if (!array_key_exists($field, $input)) {
+            continue;
+        }
+        $value = trim((string) $input[$field]);
+        $args[] = '--' . $field . '=' . $value;
+        $hasField = true;
+    }
+
+    if (array_key_exists('group_key', $input) || array_key_exists('group-key', $input)) {
+        $groupKey = trim((string) ($input['group_key'] ?? $input['group-key'] ?? ''));
+        $args[] = '--group-key=' . $groupKey;
+        $hasField = true;
+    }
+
+    if (array_key_exists('status', $input)) {
+        $status = trim((string) $input['status']);
+        if ($status !== '') {
+            $args[] = '--status=' . $status;
+            $hasField = true;
+        }
+    }
+
+    if (array_key_exists('personal_id', $input) || array_key_exists('personal-id', $input)) {
+        $personalId = trim((string) ($input['personal_id'] ?? $input['personal-id'] ?? ''));
+        $args[] = '--personal-id=' . $personalId;
+        $hasField = true;
+    }
+
+    if (!$hasField) {
+        throw new RuntimeException('Provide at least one field to update.');
+    }
+
+    return users_mutation_payload($root, 'user_update', $args, 'User update failed.');
+}
+
+/**
+ * @param array<string, mixed> $input
+ * @return array<string, mixed>
+ */
+function users_delete_payload(string $root, array $input): array
+{
+    $userId = (int) ($input['id'] ?? 0);
+    if ($userId <= 0) {
+        throw new RuntimeException('A positive user id is required.');
+    }
+
+    $args = [(string) $userId, '--force'];
+    if (!empty($input['revoke_sessions'])) {
+        $args[] = '--revoke-sessions';
+    }
+
+    return users_mutation_payload($root, 'user_delete', $args, 'User delete failed.');
+}
+
+/**
+ * @param array<string, mixed> $input
+ * @return array<string, mixed>
+ */
+function users_password_payload(string $root, array $input): array
+{
+    $userId = (int) ($input['id'] ?? 0);
+    $password = (string) ($input['password'] ?? '');
+
+    if ($userId <= 0) {
+        throw new RuntimeException('A positive user id is required.');
+    }
+    if (strlen($password) < 5) {
+        throw new RuntimeException('Password must be at least 5 characters.');
+    }
+
+    $args = [(string) $userId, '--password=' . $password];
+    if (!empty($input['revoke_sessions'])) {
+        $args[] = '--revoke-sessions';
+    }
+
+    return users_mutation_payload($root, 'user_password', $args, 'Password update failed.');
+}
+
+/**
+ * @param list<string> $extraArgs
+ * @return array<string, mixed>
+ */
+function users_mutation_payload(string $root, string $action, array $extraArgs, string $fallbackMessage): array
+{
+    $result = run_cli_action($root, $action, $extraArgs);
+    $decoded = users_decode_object((string) ($result['stdout'] ?? ''));
+    $cliOk = (bool) ($result['ok'] ?? false);
+    $jsonOk = is_array($decoded) && array_key_exists('ok', $decoded) ? (bool) $decoded['ok'] : $cliOk;
+    $ok = $cliOk && $jsonOk;
+
+    if (!$ok) {
+        $stderr = trim((string) ($result['stderr'] ?? ''));
+        $stdout = trim((string) ($result['stdout'] ?? ''));
+        $message = '';
+        if (is_array($decoded) && !empty($decoded['message'])) {
+            $message = (string) $decoded['message'];
+        } elseif ($stderr !== '') {
+            $message = $stderr;
+        } elseif ($stdout !== '') {
+            $message = first_non_empty_line($stdout);
+        } else {
+            $message = $fallbackMessage;
+        }
+
+        return [
+            'ok' => false,
+            'message' => $message,
+            'user' => is_array($decoded['user'] ?? null) ? $decoded['user'] : null,
+            'raw' => [
+                'stdout' => $stdout,
+                'stderr' => $stderr,
+                'exit_code' => (int) ($result['exit_code'] ?? 1),
+            ],
+        ];
+    }
+
+    $payload = is_array($decoded) ? $decoded : [];
+    $payload['ok'] = true;
+    if (empty($payload['message'])) {
+        $payload['message'] = 'User operation completed.';
+    }
+    $payload['raw'] = [
+        'stdout' => trim((string) ($result['stdout'] ?? '')),
+        'stderr' => trim((string) ($result['stderr'] ?? '')),
+        'exit_code' => (int) ($result['exit_code'] ?? 0),
+    ];
+
+    return $payload;
 }
 
 function users_browser_snippet(string $token, string $authKey, string $authMode): string

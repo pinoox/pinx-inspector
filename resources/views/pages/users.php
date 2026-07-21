@@ -5,9 +5,12 @@
               <div>
                 <div class="ux-page-kicker">Access / Users</div>
                 <div class="flex items-center gap-3"><h2 class="ux-page-title">Users</h2><span id="usersTotalBadge" class="rounded-xl bg-sky-400/20 px-3 py-1 text-sm font-bold text-sky-200">0</span></div>
-                <p class="ux-page-copy">Browse users in the active app transport scope and issue a session/JWT token with one click.</p>
+                <p class="ux-page-copy">Browse, create, edit, and manage users in the active app transport scope.</p>
               </div>
-              <div class="ux-actions"><button onclick="loadUsers()" class="ux-btn">Refresh</button></div>
+              <div class="ux-actions">
+                <button onclick="openUserForm('create')" class="ux-btn ux-btn-primary">New User</button>
+                <button onclick="loadUsers()" class="ux-btn">Refresh</button>
+              </div>
             </div>
             <div id="usersActionResult" class="mb-4 hidden"></div>
             <div class="ux-toolbar">
