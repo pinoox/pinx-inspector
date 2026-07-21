@@ -18,7 +18,7 @@
                 <span class="pointer-events-none absolute left-3 top-2.5 text-slate-500">?</span>
                 <input id="tableFilter" class="ux-filter w-full pl-9" placeholder="Search tables...">
               </div>
-              <button onclick="renderTableList($('tablesDb'))" title="Refresh tables" class="ux-btn grid w-11 place-items-center px-0"><?= inspector_icon('refresh-cw') ?></button>
+              <button type="button" onclick="loadTables({ autoOpen: false })" title="Refresh tables" class="ux-btn grid w-11 place-items-center px-0"><?= inspector_icon('refresh-cw') ?></button>
             </div>
             <div class="mb-3 flex items-center justify-between px-1 text-xs text-slate-500">
               <label class="inline-flex items-center gap-2"><input id="tableListSelectAll" type="checkbox" class="h-3.5 w-3.5 rounded border-slate-600 bg-black/30 text-violet-500" onchange="toggleAllTableListSelection(this.checked)"><span>Tables</span></label>
